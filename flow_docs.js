@@ -159,13 +159,52 @@
   // Leitura de uma LD para a Base Documental
   // ---------------------------------------------------------------------------
 
+  async function hashDoBuffer(buffer) {
+    const crypto = root.crypto;
+    if (!crypto || !crypto.subtle || !crypto.subtle.digest) return "";
+    const digest = await crypto.subtle.digest("SHA-256", buffer.slice(0));
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  function metadadosDasAbas(workbook, lido) {
+    const porNome = new Map();
+    const metadata = workbook.Workbook && workbook.Workbook.Sheets || [];
+    const obter = (nome) => {
+      if (!porNome.has(nome)) {
+        const info = metadata.find((item) => texto(item && item.name) === nome);
+        porNome.set(nome, {
+          nome,
+          papel: "tecnica",
+          oculta: Boolean(Number(info && info.Hidden)),
+          registros: 0,
+        });
+      }
+      return porNome.get(nome);
+    };
+    (lido.records || []).forEach((registro) => {
+      const aba = obter(texto(registro.sheet) || "(sem nome)");
+      aba.registros += 1;
+      aba.oculta = aba.oculta || Boolean(Number(registro.sheetHidden));
+    });
+    (lido.history || []).forEach((registro) => {
+      const aba = obter(texto(registro.sheet) || "Colar SIGEM");
+      aba.papel = "historico";
+      aba.registros += 1;
+      aba.oculta = aba.oculta || Boolean(Number(registro.sheetHidden));
+    });
+    return [...porNome.values()].map((aba) => ({
+      ...aba,
+      selecionadaPorPadrao: aba.papel === "tecnica" && !aba.oculta,
+    }));
+  }
+
   /**
-   * Lê a planilha com o motor documental do GRCON e devolve os registros já no
-   * formato do banco. O motor é quem sabe achar o cabeçalho em qualquer linha,
-   * reconhecer as abas vigentes e mapear colunas com nomes diferentes — por
-   * isso ele é reaproveitado inteiro em vez de reescrito aqui.
+   * Lê uma vez o arquivo e guarda as duas fontes separadas. A aba histórica
+   * `Colar SIGEM` continua disponível como evidência, mas jamais entra no
+   * índice vigente das LDs.
    */
-  async function lerLd(arquivo) {
+  async function lerFonteLd(arquivo) {
     const XLSX = root.XLSX;
     const core = Core();
     if (!XLSX || !core) throw new Error("Motor documental indisponível. Recarregue a página.");
@@ -182,40 +221,243 @@
     }
 
     const lido = core.parseWorkbook(workbook, arquivo.name, arquivo.lastModified || Date.now(), null);
-    const registros = (lido.records || []).concat(lido.history || []);
+    return {
+      nome: texto(arquivo.name),
+      tamanho: Number(arquivo.size) || buffer.byteLength || 0,
+      modificadoEm: Number(arquivo.lastModified) || 0,
+      hash: await hashDoBuffer(buffer),
+      ldVersion: texto(lido.ldVersion),
+      registrosTecnicos: lido.records || [],
+      registrosHistoricos: lido.history || [],
+      abas: metadadosDasAbas(workbook, lido),
+    };
+  }
 
-    const documentos = registros.map((registro) => {
-      const codigo = texto(registro.document);
-      const principal = chave(registro.documentKey || codigo);
-      const alternativa = chaveAlternativa(codigo);
-      const estado = core.allocationEvidenceState ? core.allocationEvidenceState(registro) : null;
-      return {
-        document: codigo,
-        document_key: principal,
-        nt_key: alternativa && alternativa !== principal ? alternativa : "",
-        title: texto(registro.title),
-        title_norm: normalizar(registro.title),
-        revision: texto(registro.revision),
-        allocation: texto(registro.allocation),
-        allocation_status: texto(registro.allocationStatus),
-        allocation_kind: texto(estado && estado.kind),
-        grdt: texto(registro.grdt),
-        sigem_status: texto(registro.sigemStatus),
-        discipline: texto(registro.discipline),
-        document_type: texto(registro.documentType),
-        purpose: texto(registro.purpose),
-        tag: texto(registro.tag),
-        sheet: texto(registro.sheet),
-        row_number: Number(registro.row) || 0,
-        ld_version_label: texto(registro.ldVersion || lido.ldVersion),
-      };
-    }).filter((item) => item.document_key);
+  function familiaDoRegistro(registro) {
+    const codigo = texto(registro && registro.document);
+    const aba = normalizar(registro && registro.sheet);
+    if (/^[A-Z0-9]{2,10}-RNC-\d{5}\/\d{4}$/i.test(codigo)) return "INTERNO";
+    if (aba === "ET" || /_RNEST_/i.test(codigo)) return "ET";
+    if (aba === "CV") return "CV";
+    return "N-1710";
+  }
 
+  function tipoDoRegistro(registro, familia) {
+    const informado = texto(registro && registro.documentType);
+    if (informado) return informado;
+    const codigo = texto(registro && registro.document);
+    if (familia === "ET") return texto(codigo.split("_")[5]);
+    if (familia === "N-1710") {
+      const grupos = codigo.split("-");
+      return /^[IAFLED]$/i.test(grupos[0] || "") ? texto(grupos[1]) : texto(grupos[0]);
+    }
+    if (familia === "CV") return "CV";
+    if (familia === "INTERNO") return "RNC";
+    return "";
+  }
+
+  function tagDoRegistro(registro, familia) {
+    const informado = texto(registro && registro.tag);
+    if (informado) return informado;
+    const core = Core();
+    if (familia !== "ET" || !core || !core.reportGroup7Info) return "";
+    return texto(core.reportGroup7Info(registro.document).tag);
+  }
+
+  function conjuntoRegra(regras, chave, padrao) {
+    const valor = regras && regras[chave];
+    return new Set((Array.isArray(valor) ? valor : padrao || []).map(normalizar));
+  }
+
+  function validarRegistro(registro, regras) {
+    const core = Core();
+    const familia = familiaDoRegistro(registro);
+    if (familia === "INTERNO") return { familia, valido: true, mensagens: [] };
+
+    const base = core && core.validateDocumentCode
+      ? core.validateDocumentCode(registro.document, registro.sheet)
+      : { valid: true, errors: [] };
+    const mensagens = [...(base.errors || [])];
+
+    if (familia === "ET") {
+      const grupos = texto(registro.document).split("_");
+      const emissores = conjuntoRegra(regras, "emissores", ["C1O"]);
+      const unidades = conjuntoRegra(regras, "unidades", ["U32"]);
+      const tipos = conjuntoRegra(regras, "tipos_relatorio", []);
+      if (grupos[0] && emissores.size && !emissores.has(normalizar(grupos[0]))) {
+        mensagens.push("Grupo 1 (emissor) não consta na regra vigente.");
+      }
+      if (grupos[2] && unidades.size && !unidades.has(normalizar(grupos[2]))) {
+        mensagens.push("Grupo 3 (unidade) não consta na regra vigente.");
+      }
+      if (grupos[5] && tipos.size && !tipos.has(normalizar(grupos[5]))) {
+        mensagens.push("Grupo 6 (tipo de relatório) não consta no catálogo da ET vigente.");
+      }
+    }
+    return { familia, valido: mensagens.length === 0, mensagens: [...new Set(mensagens)] };
+  }
+
+  function assinatura(registro) {
+    const core = Core();
+    const estado = core && core.allocationEvidenceState ? core.allocationEvidenceState(registro) : null;
+    return JSON.stringify([
+      normalizar(registro.title), normalizar(registro.revision), normalizar(registro.allocation),
+      normalizar(registro.allocationStatus), texto(estado && estado.kind),
+      normalizar(registro.grdt), normalizar(registro.sigemStatus), normalizar(registro.discipline),
+      normalizar(registro.documentType), normalizar(registro.purpose), normalizar(registro.tag),
+    ]);
+  }
+
+  function escolherMaisRecente(registros) {
+    const core = Core();
+    const ordenados = (registros || []).slice().sort((a, b) => (
+      Number(Boolean(b.sheetHidden)) - Number(Boolean(a.sheetHidden))
+      || (Number(b.sourceOrder) || 0) - (Number(a.sourceOrder) || 0)
+      || (Number(b.row) || 0) - (Number(a.row) || 0)
+    ));
+    return core && core.mostRecentRecord
+      ? core.mostRecentRecord(ordenados.filter((item) => !item.sheetHidden).length
+        ? ordenados.filter((item) => !item.sheetHidden) : ordenados)
+      : ordenados[0];
+  }
+
+  function mapearDocumento(registro, regras) {
+    const core = Core();
+    const codigo = texto(registro.document);
+    const principal = chave(registro.documentKey || codigo);
+    const alternativa = chaveAlternativa(codigo);
+    const estado = core && core.allocationEvidenceState ? core.allocationEvidenceState(registro) : null;
+    const validacao = validarRegistro(registro, regras);
+    const tipo = tipoDoRegistro(registro, validacao.familia);
+    return {
+      document: codigo,
+      document_key: principal,
+      nt_key: alternativa && alternativa !== principal ? alternativa : "",
+      title: texto(registro.title),
+      title_norm: normalizar(registro.title),
+      revision: texto(registro.revision),
+      allocation: texto(registro.allocation),
+      allocation_status: texto(registro.allocationStatus),
+      allocation_kind: texto(estado && estado.kind),
+      grdt: texto(registro.grdt),
+      sigem_status: texto(registro.sigemStatus),
+      discipline: texto(registro.discipline),
+      document_type: tipo,
+      purpose: texto(registro.purpose),
+      tag: tagDoRegistro(registro, validacao.familia),
+      sheet: texto(registro.sheet),
+      row_number: Number(registro.row) || 0,
+      ld_version_label: texto(registro.ldVersion),
+      raw: {
+        source_kind: "technical",
+        source_file: texto(registro.source),
+        sheet_hidden: Boolean(Number(registro.sheetHidden)),
+        effective_date: texto(registro.effectiveDate),
+        status: texto(registro.status),
+        format: texto(registro.format),
+        databook: texto(registro.databook),
+        code_family: validacao.familia,
+        validation_status: validacao.valido ? "valido" : "alerta",
+        validation_messages: validacao.mensagens,
+      },
+    };
+  }
+
+  /**
+   * Constrói a prévia publicável. Duplicatas idênticas são consolidadas;
+   * conflitos permanecem bloqueados até o administrador assumir, de forma
+   * explícita, a regra determinística da linha técnica mais recente.
+   */
+  function analisarFonteLd(fonte, opcoes = {}) {
+    const selecionadas = new Set(
+      Array.isArray(opcoes.abasIncluidas)
+        ? opcoes.abasIncluidas.map(texto)
+        : (fonte.abas || []).filter((aba) => aba.selecionadaPorPadrao).map((aba) => aba.nome)
+    );
+    const registros = (fonte.registrosTecnicos || []).filter((registro) => selecionadas.has(texto(registro.sheet)));
+    const grupos = new Map();
+    registros.forEach((registro) => {
+      const key = chave(registro.documentKey || registro.document);
+      if (!key) return;
+      if (!grupos.has(key)) grupos.set(key, []);
+      grupos.get(key).push(registro);
+    });
+
+    const documentos = [];
+    const conflitos = [];
+    const alertasCodigo = [];
+    let duplicadosIdenticos = 0;
+    grupos.forEach((ocorrencias, documentKey) => {
+      const variantes = new Map();
+      ocorrencias.forEach((registro) => {
+        const sig = assinatura(registro);
+        if (!variantes.has(sig)) variantes.set(sig, []);
+        variantes.get(sig).push(registro);
+      });
+      duplicadosIdenticos += ocorrencias.length - variantes.size;
+      if (variantes.size > 1) {
+        const conflito = {
+          document_key: documentKey,
+          document: texto(ocorrencias[0].document),
+          ocorrencias: ocorrencias.map((item) => ({
+            sheet: texto(item.sheet), row_number: Number(item.row) || 0,
+            revision: texto(item.revision), title: texto(item.title),
+            allocation: texto(item.allocation), allocation_status: texto(item.allocationStatus),
+            grdt: texto(item.grdt), sigem_status: texto(item.sigemStatus),
+          })),
+        };
+        conflitos.push(conflito);
+        if (opcoes.resolverConflitos !== "linha_mais_recente") return;
+      }
+      const escolhido = escolherMaisRecente(ocorrencias);
+      const documento = mapearDocumento(escolhido, opcoes.regras || {});
+      if (documento.raw.validation_status === "alerta") {
+        alertasCodigo.push({
+          document: documento.document, sheet: documento.sheet, row_number: documento.row_number,
+          messages: documento.raw.validation_messages,
+        });
+      }
+      documentos.push(documento);
+    });
+
+    const erros = [];
+    if (!selecionadas.size || !registros.length) erros.push("Selecione ao menos uma aba técnica com documentos.");
+    if (conflitos.length && opcoes.resolverConflitos !== "linha_mais_recente") {
+      erros.push(`${conflitos.length.toLocaleString("pt-BR")} código(s) possuem linhas técnicas divergentes.`);
+    }
+
+    const abas = (fonte.abas || []).map((aba) => ({ ...aba, selecionada: selecionadas.has(aba.nome) }));
     return {
       documentos,
-      ldVersion: texto(lido.ldVersion),
-      abas: [...new Set(registros.map((registro) => texto(registro.sheet)).filter(Boolean))],
+      ldVersion: texto(fonte.ldVersion),
+      hash: texto(fonte.hash),
+      abas,
+      conflitos,
+      alertasCodigo,
+      erros,
+      podePublicar: erros.length === 0,
+      relatorio: {
+        schema_version: 1,
+        source_hash: texto(fonte.hash),
+        technical_rows_read: registros.length,
+        history_rows_excluded: (fonte.registrosHistoricos || []).length,
+        unique_documents: documentos.length,
+        identical_duplicates_removed: duplicadosIdenticos,
+        conflicting_documents: conflitos.length,
+        conflict_resolution: opcoes.resolverConflitos || "bloquear",
+        code_warnings: alertasCodigo.length,
+        included_sheets: abas.filter((aba) => aba.selecionada).map((aba) => aba.nome),
+        excluded_history_sheets: abas.filter((aba) => aba.papel === "historico").map((aba) => aba.nome),
+        conflict_sample: conflitos.slice(0, 50),
+        warning_sample: alertasCodigo.slice(0, 100),
+      },
     };
+  }
+
+  /** Compatibilidade com integrações antigas: usa apenas abas técnicas visíveis. */
+  async function lerLd(arquivo, opcoes = {}) {
+    const fonte = await lerFonteLd(arquivo);
+    return analisarFonteLd(fonte, opcoes);
   }
 
   root.FlowDocs = Object.freeze({
@@ -229,6 +471,8 @@
     daListaColada,
     deArquivos,
     semRepetidos,
+    lerFonteLd,
+    analisarFonteLd,
     lerLd,
   });
 })(window);

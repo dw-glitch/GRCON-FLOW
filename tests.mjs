@@ -103,6 +103,77 @@ check("repetição sai pelo código, e itens sem código nunca são descartados"
   assert.equal(itens[0].requested_title, "Título que chegou depois", "o título informado depois é preservado");
 });
 
+// ── Pré-análise segura de LD ──────────────────────────────────────────────
+
+function fonteLd(registrosTecnicos, registrosHistoricos = [], abas = []) {
+  return {
+    nome: "LD_TESTE.xlsx", hash: "abc123", ldVersion: "Q",
+    registrosTecnicos, registrosHistoricos,
+    abas: abas.length ? abas : [
+      { nome: "ET", papel: "tecnica", oculta: false, registros: registrosTecnicos.length, selecionadaPorPadrao: true },
+      { nome: "Colar SIGEM", papel: "historico", oculta: false, registros: registrosHistoricos.length, selecionadaPorPadrao: false },
+    ],
+  };
+}
+
+check("histórico SIGEM nunca entra no índice vigente da LD", () => {
+  const fonte = fonteLd([
+    { document: "MA-5290.00-22000-ABC-C1O-001", documentKey: "MA-5290.00-22000-ABC-C1O-001", sheet: "N-1710", row: 10 },
+  ], [
+    { document: "MA-5290.00-22000-ABC-C1O-999", documentKey: "MA-5290.00-22000-ABC-C1O-999", sheet: "Colar SIGEM", row: 20 },
+  ], [
+    { nome: "N-1710", papel: "tecnica", oculta: false, registros: 1, selecionadaPorPadrao: true },
+    { nome: "Colar SIGEM", papel: "historico", oculta: false, registros: 1, selecionadaPorPadrao: false },
+  ]);
+  const analise = Docs.analisarFonteLd(fonte);
+  assert.equal(analise.documentos.length, 1);
+  assert.equal(analise.relatorio.history_rows_excluded, 1);
+  assert.doesNotMatch(JSON.stringify(analise.documentos), /C1O-999/);
+});
+
+check("aba técnica oculta exige seleção manual", () => {
+  const fonte = fonteLd([
+    { document: "MA-5290.00-22000-ABC-C1O-001", documentKey: "A", sheet: "N-1710", sheetHidden: 1, row: 10 },
+    { document: "MA-5290.00-22000-ABC-C1O-002", documentKey: "B", sheet: "N-1710 MOD", row: 10 },
+  ], [], [
+    { nome: "N-1710", papel: "tecnica", oculta: true, registros: 1, selecionadaPorPadrao: false },
+    { nome: "N-1710 MOD", papel: "tecnica", oculta: false, registros: 1, selecionadaPorPadrao: true },
+  ]);
+  const padrao = Docs.analisarFonteLd(fonte);
+  assert.equal(padrao.documentos.length, 1);
+  assert.equal(padrao.documentos[0].sheet, "N-1710 MOD");
+  const explicita = Docs.analisarFonteLd(fonte, { abasIncluidas: ["N-1710", "N-1710 MOD"] });
+  assert.equal(explicita.documentos.length, 2);
+});
+
+check("conflito bloqueia a LD até a regra ser assumida explicitamente", () => {
+  const documento = "MA-5290.00-22000-ABC-C1O-001";
+  const fonte = fonteLd([
+    { document: documento, documentKey: documento, sheet: "N-1710", row: 10, revision: "A", title: "Título A" },
+    { document: documento, documentKey: documento, sheet: "N-1710", row: 20, revision: "B", title: "Título B" },
+  ], [], [{ nome: "N-1710", papel: "tecnica", oculta: false, registros: 2, selecionadaPorPadrao: true }]);
+  const bloqueada = Docs.analisarFonteLd(fonte);
+  assert.equal(bloqueada.podePublicar, false);
+  assert.equal(bloqueada.conflitos.length, 1);
+  assert.equal(bloqueada.documentos.length, 0);
+  const aprovada = Docs.analisarFonteLd(fonte, { resolverConflitos: "linha_mais_recente" });
+  assert.equal(aprovada.podePublicar, true);
+  assert.equal(aprovada.documentos.length, 1);
+  assert.equal(aprovada.documentos[0].revision, "B");
+  assert.equal(aprovada.relatorio.conflict_resolution, "linha_mais_recente");
+});
+
+check("duplicatas idênticas são consolidadas sem criar falso conflito", () => {
+  const registro = { document: "MA-5290.00-22000-ABC-C1O-001", documentKey: "DOC1", sheet: "N-1710", revision: "A", title: "Mesmo título" };
+  const fonte = fonteLd([{ ...registro, row: 10 }, { ...registro, row: 11 }], [], [
+    { nome: "N-1710", papel: "tecnica", oculta: false, registros: 2, selecionadaPorPadrao: true },
+  ]);
+  const analise = Docs.analisarFonteLd(fonte);
+  assert.equal(analise.documentos.length, 1);
+  assert.equal(analise.conflitos.length, 0);
+  assert.equal(analise.relatorio.identical_duplicates_removed, 1);
+});
+
 // ── Exportação ─────────────────────────────────────────────────────────────
 
 check("a exportação reproduz as 26 colunas do Controle de Solicitações", () => {
@@ -279,6 +350,39 @@ check("a aba Acesso é de administrador e existe de ponta a ponta", () => {
     assert.match(api, new RegExp(`\\b${metodo}\\b`), `falta ${metodo} no grupo acesso`);
   });
   assert.match(api, /usuarios, acesso, exportacao/, "o grupo acesso precisa ser exportado");
+});
+
+check("normas e catálogos são administráveis e versionados", () => {
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /\{ chave: "normas", rotulo: "Normas e códigos", admin: true \}/);
+  assert.match(painel, /FlowNormas\.montar\(conteudo\)/);
+  const pagina = fs.readFileSync(path.join(root, "painel.html"), "utf8");
+  assert.match(pagina, /flow_normas\.js/);
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /const normas = \{/);
+  assert.match(api, /flow_active_code_rules/);
+  const migration = fs.readFileSync(path.join(root, "database/migrations/flow_13_versioned_norms.sql"), "utf8");
+  assert.match(migration, /create table if not exists public\.flow_norm_versions/i);
+  assert.match(migration, /flow_norm_catalog_current_uidx/);
+  assert.match(migration, /TIPOS_RELATORIO/);
+});
+
+check("o proprietário inicial depende de e-mail preparado, não de corrida pelo primeiro cadastro", () => {
+  const migration = fs.readFileSync(path.join(root, "database/migrations/flow_14_secure_owner_and_permissions.sql"), "utf8");
+  assert.match(migration, /flow_owner_bootstrap/);
+  assert.match(migration, /flow_prepare_owner_bootstrap/);
+  assert.match(migration, /E-mail preparado para o primeiro proprietário/);
+  assert.doesNotMatch(migration, /Primeiro acesso do sistema/);
+  assert.match(migration, /revoke insert,update,delete on public\.flow_profiles from authenticated/i);
+});
+
+check("toda nova solicitação notifica a equipe ativa em tempo real", () => {
+  const migration = fs.readFileSync(path.join(root, "database/migrations/flow_14_secure_owner_and_permissions.sql"), "utf8");
+  assert.match(migration, /flow_notify_new_request_trigger/);
+  assert.match(migration, /alter publication supabase_realtime add table public\.flow_notifications/i);
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /postgres_changes/);
+  assert.match(api, /flow-notificacoes-/);
 });
 
 check("a configuração publicada não carrega chave secreta", () => {

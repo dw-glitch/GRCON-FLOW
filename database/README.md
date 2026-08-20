@@ -19,6 +19,10 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_09_hardening` | RLS no contador, extensões fora do `public`, revogação do acesso anônimo |
 | `flow_10_acesso` | Domínios autorizados, lista de e-mails da equipe, hook de cadastro |
 | `flow_11_espelho_allowlist` | Mantém a lista de acesso coerente com os papéis |
+| `flow_12_safe_ld_import` | Pré-análise auditável, hash, unicidade, finalização e ativação segura das LDs |
+| `flow_13_versioned_norms` | Normas, revisões, catálogos versionados e bucket de PDFs controlados |
+| `flow_14_secure_owner_and_permissions` | Bootstrap por e-mail, perfis sem autoelevação e notificações da equipe |
+| `flow_15_seed_norm_versions` | Garante as revisões normativas iniciais em projetos já migrados |
 
 ## Tabelas
 
@@ -40,6 +44,9 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_settings` | Configurações gerais, inclusive os domínios autorizados. |
 | `flow_access_allowlist` | E-mails da equipe e o papel de cada um. Admin-only. |
 | `flow_protocol_counters` | Numeração do protocolo. Sem policy: só a função a alcança. |
+| `flow_norms` / `flow_norm_versions` | Norma e histórico de revisões, com uma vigente por código. |
+| `flow_norm_catalog_entries` | Histórico append-only dos códigos usados na validação das LDs. |
+| `flow_owner_bootstrap` | E-mail único autorizado a criar o primeiro proprietário. Não é exposto à API. |
 
 Os **domínios** ficam em `flow_settings` porque o domínio de e-mail de uma
 empresa não é segredo — e essa tabela é legível por qualquer autenticado. Já a
@@ -93,12 +100,12 @@ vez de cada um ter a sua cópia:
 
 1. e-mail na lista → entra com o papel de lá (**passa por cima do domínio**);
 2. domínio autorizado → entra como `solicitante`;
-3. nenhum domínio configurado → entra como `solicitante` (projeto recém-criado);
+3. nenhum domínio configurado → cadastro de solicitantes fechado;
 4. caso contrário → recusado.
 
-O primeiro usuário do sistema entra como `proprietario` sem passar por nada
-disso — é o bootstrap, e a decisão é serializada com `pg_advisory_xact_lock` para
-que dois cadastros simultâneos não se vejam ambos como "o primeiro".
+Quando ainda não há usuário, somente o e-mail registrado por
+`flow_prepare_owner_bootstrap()` pode entrar, já como `proprietario`. A decisão é
+serializada e o convite é marcado como usado no mesmo cadastro.
 
 **O hook precisa ser ativado no painel** (*Authentication → Hooks → Before User
 Created*). Ele existe porque o GoTrue não propaga a mensagem de um
@@ -123,6 +130,7 @@ prontas e faz o que sabe fazer melhor — acesso por índice.
 | --- | --- | --- |
 | `flow-anexos` | Anexos das solicitações. Caminho começa pelo id da solicitação. | 25 MB |
 | `flow-lds` | Arquivos originais das LDs. Área interna. | 100 MB |
+| `flow-normas` | PDFs controlados das revisões normativas. Área interna. | 50 MB |
 
 Ambos privados, com políticas que conferem quem pode ler e escrever.
 
@@ -130,5 +138,5 @@ Ambos privados, com políticas que conferem quem pode ler e escrever.
 
 Aplique as migrações na ordem da tabela acima, pelo painel do Supabase ou pelo
 CLI. Depois aponte `FLOW_SUPABASE_URL` e `FLOW_SUPABASE_ANON_KEY` para o novo
-projeto e rode `npm run build`. O primeiro usuário a se cadastrar vira
-proprietário.
+projeto e rode `npm run build`. Antes do primeiro cadastro, prepare o e-mail do
+proprietário com `flow_prepare_owner_bootstrap()`.

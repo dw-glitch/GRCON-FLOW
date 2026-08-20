@@ -9,6 +9,7 @@
     "build": "node scripts/build-runtime-config.mjs",
     "dev": "node scripts/build-runtime-config.mjs && node scripts/serve.mjs",
     "check:syntax": "node scripts/verificar-sintaxe.mjs",
+    "verify:lds": "node scripts/auditar-lds-reais.mjs",
     "verify": "npm run build && npm run check:syntax && node tests.mjs"
   }
 }

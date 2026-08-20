@@ -861,6 +861,7 @@
   const ABAS = [
     { chave: "solicitacoes", rotulo: "Solicitações" },
     { chave: "lds", rotulo: "Base de LDs", admin: true },
+    { chave: "normas", rotulo: "Normas e códigos", admin: true },
     { chave: "tipos", rotulo: "Tipos de solicitação", admin: true },
     { chave: "usuarios", rotulo: "Usuários", admin: true },
     { chave: "acesso", rotulo: "Acesso", admin: true },
@@ -884,6 +885,8 @@
       desenharTabela();
     } else if (estado.aba === "lds") {
       root.FlowLd.montar(conteudo);
+    } else if (estado.aba === "normas") {
+      root.FlowNormas.montar(conteudo);
     } else if (estado.aba === "tipos") {
       root.FlowAdmin.montarTipos(conteudo, estado.tipos, recarregarTipos);
     } else if (estado.aba === "usuarios") {
@@ -935,5 +938,14 @@
     estado.tipos = data || [];
     estado.tiposPorCodigo = new Map(estado.tipos.map((tipo) => [tipo.code, tipo]));
     montarPagina();
+    const pararNotificacoes = Api.notificacoes.assinar((notificacao) => {
+      avisar(texto(notificacao.title) || "Nova solicitação recebida.", "ok");
+      if (estado.aba === "solicitacoes") {
+        carregarSolicitacoes();
+        const indicadores = document.getElementById("painel-indicadores");
+        if (indicadores) montarIndicadores(indicadores);
+      }
+    });
+    root.addEventListener("beforeunload", pararNotificacoes, { once: true });
   })();
 })(window);

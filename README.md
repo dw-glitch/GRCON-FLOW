@@ -119,8 +119,20 @@ o motor documental do GRCON (`core.js`), que reconhece cabeçalho em qualquer
 linha, abas vigentes e colunas com nomes diferentes; indexa os documentos no
 Postgres; e ativa a nova versão.
 
+A publicação começa por uma **pré-análise**: `Colar SIGEM` é preservada como
+histórico, mas nunca entra no índice vigente; abas técnicas ocultas exigem
+seleção manual; duplicatas idênticas são consolidadas; e linhas divergentes
+bloqueiam a ativação até o administrador assumir uma regra de resolução. O
+arquivo original, o hash, as abas escolhidas, os alertas e essa decisão ficam no
+relatório da versão.
+
 A revisão anterior fica **inativa, não apagada**, e cada triagem registra qual
-versão usou. Atualizar todo dia é um upload e um clique.
+versão usou.
+
+Em **Painel → Normas e códigos**, o proprietário mantém normas, revisões e os
+catálogos usados na validação. Uma nova revisão nasce como rascunho e só passa a
+reger as próximas LDs quando for ativada explicitamente; a anterior continua no
+histórico.
 
 ---
 
@@ -153,8 +165,8 @@ apenas os itens selecionados.
 Duas travas independentes, ambas em **Painel → Acesso**:
 
 - **Domínios autorizados** — só e-mails desses domínios conseguem criar conta, e
-  entram como **solicitante**. Já vem com `agnet.com.br`. Lista vazia = cadastro
-  aberto a qualquer e-mail, e a tela avisa disso em destaque.
+  entram como **solicitante**. Já vem com `agnet.com.br`. Lista vazia mantém o
+  cadastro de solicitantes fechado.
 - **Lista da equipe** — e-mails que entram direto como **operador** (ou o papel
   que você escolher). A lista **passa por cima do domínio**, o que permite dar
   acesso a um consultor de fora sem abrir a empresa inteira.
@@ -166,8 +178,9 @@ recriar o cadastro. Tirar da lista impede um cadastro novo com aquele papel, mas
 Promover ou rebaixar em Usuários mantém a lista em dia automaticamente, para as
 duas telas nunca discordarem.
 
-O **primeiro** usuário do sistema vira **proprietário** automaticamente — sem
-isso não haveria como administrar o aplicativo recém-publicado.
+O primeiro proprietário não é mais escolhido por corrida de cadastro. Antes de
+abrir o aplicativo, seu e-mail precisa ser preparado uma única vez no bootstrap
+seguro; somente esse endereço poderá criar a conta proprietária inicial.
 
 As permissões são aplicadas na tela **e** no banco (RLS + funções que conferem o
 papel). A tela só evita mostrar o que geraria erro; quem recusa de verdade é o
@@ -177,18 +190,22 @@ Postgres.
 
 ## Primeiro acesso
 
-### Antes de tudo: dois ajustes no painel do Supabase
+### Antes de tudo: três ajustes no painel do Supabase
 
 Nenhum dos dois se resolve por código, e **sem o primeiro ninguém consegue
 entrar**.
 
-1. **Confirmação de e-mail.** O projeto usa o SMTP padrão do Supabase, que só
+1. **Proprietário inicial.** No SQL Editor, com acesso administrativo, execute
+   `select public.flow_prepare_owner_bootstrap('seu-email@empresa.com');`. O
+   cadastro fica fechado até esse e-mail ser preparado.
+
+2. **Confirmação de e-mail.** O projeto usa o SMTP padrão do Supabase, que só
    entrega para membros do projeto e é fortemente limitado — um colega que se
    cadastre não recebe o e-mail e fica de fora. Em *Authentication → Providers →
    Email*, desmarque **Confirm email**; ou configure o SMTP da empresa em
    *Authentication → Emails → SMTP Settings*, que é o certo a médio prazo.
 
-2. **Hook de cadastro.** Em *Authentication → Hooks*, ative **Before User
+3. **Hook de cadastro.** Em *Authentication → Hooks*, ative **Before User
    Created** apontando para `public.flow_antes_de_criar_usuario`. É o que faz a
    recusa por domínio chegar como uma frase legível. Sem o hook o cadastro
    **continua sendo barrado** — só que a pessoa vê `Database error saving new
@@ -196,13 +213,14 @@ entrar**.
 
 ### Depois
 
-1. Abra a aplicação e **crie sua conta** — o primeiro cadastro vira proprietário.
+1. Abra a aplicação e crie a conta com o e-mail preparado — ela nasce como proprietária.
 2. **Painel → Acesso** — confira os domínios e cadastre os e-mails da equipe de
    qualidade.
 3. **Painel → Base de LDs** — cadastre suas LDs e publique a revisão vigente de
    cada uma.
-4. **Painel → Tipos de solicitação** — ajuste rótulos, prazos e campos.
-5. Divulgue o link. Quem for da empresa se cadastra e já cai no formulário;
+4. **Painel → Normas e códigos** — confira as revisões vigentes e os catálogos.
+5. **Painel → Tipos de solicitação** — ajuste rótulos, prazos e campos.
+6. Divulgue o link. Quem for da empresa se cadastra e já cai no formulário;
    quem estiver na lista da equipe cai no painel.
 
 Sem LD publicada o aplicativo funciona: as solicitações são registradas e ficam

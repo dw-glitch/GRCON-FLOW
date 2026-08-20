@@ -156,14 +156,11 @@
     async atualizarPerfil(campos) {
       if (!state.session) return { error: "Sessão expirada." };
       const { error } = await chamar(
-        client.from("flow_profiles")
-          .update({
-            full_name: texto(campos.full_name),
-            area: texto(campos.area),
-            contact: texto(campos.contact),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", state.session.user.id),
+        client.rpc("flow_update_my_profile", {
+          p_full_name: texto(campos.full_name),
+          p_area: texto(campos.area),
+          p_contact: texto(campos.contact),
+        }),
         "atualizar perfil"
       );
       if (!error) await carregarPerfil();
@@ -407,7 +404,7 @@
     async listar() {
       return chamar(
         client.from("flow_lds")
-          .select("*, versoes:flow_ld_versions(id,revision_label,file_name,document_count,status,created_at,activated_at,uploaded_by_name,error_message)")
+          .select("*, versoes:flow_ld_versions(id,revision_label,file_name,document_count,status,created_at,activated_at,uploaded_by_name,error_message,source_hash,import_report,sheets)")
           .order("display_order", { ascending: true }),
         "listar LDs"
       );
@@ -423,23 +420,28 @@
         updated_at: new Date().toISOString(),
       };
       if (!registro.code) return { error: "Informe o identificador da LD (ex.: LD_004)." };
-      const consulta = ld.id
-        ? client.from("flow_lds").update(registro).eq("id", ld.id)
-        : client.from("flow_lds").insert(registro);
-      return chamar(consulta, "salvar LD");
+      return chamar(client.rpc("flow_save_ld", {
+        p_id: ld.id || null,
+        p_code: registro.code,
+        p_name: registro.name,
+        p_description: registro.description,
+        p_active: registro.active,
+        p_display_order: registro.display_order,
+      }), "salvar LD");
     },
 
-    async criarVersao(ldId, arquivo, revisao) {
+    async criarVersao(ldId, arquivo, revisao, analise) {
       const perfil = state.profile || {};
       return chamar(
-        client.from("flow_ld_versions").insert({
-          ld_id: ldId,
-          revision_label: texto(revisao),
-          file_name: texto(arquivo && arquivo.name),
-          status: "processando",
-          uploaded_by: state.session ? state.session.user.id : null,
-          uploaded_by_name: texto(perfil.full_name || perfil.email),
-        }).select().single(),
+        client.rpc("flow_create_ld_version", {
+          p_ld_id: ldId,
+          p_revision_label: texto(revisao),
+          p_file_name: texto(arquivo && arquivo.name),
+          p_uploaded_by_name: texto(perfil.full_name || perfil.email),
+          p_source_hash: texto(analise && analise.hash),
+          p_sheets: (analise && analise.relatorio && analise.relatorio.included_sheets) || [],
+          p_import_report: (analise && analise.relatorio) || {},
+        }),
         "criar versão da LD"
       );
     },
@@ -456,11 +458,18 @@
       return chamar(client.rpc("flow_activate_ld_version", { target_version: versaoId }), "ativar versão");
     },
 
+    async finalizarVersao(versaoId, relatorio) {
+      return chamar(
+        client.rpc("flow_finalize_ld_version", { target_version: versaoId, p_report: relatorio || {} }),
+        "finalizar versão"
+      );
+    },
+
     async marcarErro(versaoId, mensagem) {
       return chamar(
-        client.from("flow_ld_versions")
-          .update({ status: "erro", error_message: texto(mensagem).slice(0, 500) })
-          .eq("id", versaoId),
+        client.rpc("flow_fail_ld_version", {
+          target_version: versaoId, p_message: texto(mensagem).slice(0, 500),
+        }),
         "registrar falha da versão"
       );
     },
@@ -476,8 +485,73 @@
         "guardar arquivo da LD"
       );
       if (error) return { error };
-      await client.from("flow_ld_versions").update({ storage_path: caminho }).eq("id", versaoId);
-      return { error: null };
+      const salvo = await chamar(
+        client.rpc("flow_set_ld_storage_path", { target_version: versaoId, p_storage_path: caminho }),
+        "vincular arquivo da LD"
+      );
+      return { error: salvo.error };
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Normas e catálogos de codificação
+  // ---------------------------------------------------------------------------
+  const normas = {
+    async listar() {
+      return chamar(client.rpc("flow_list_norms"), "listar normas");
+    },
+
+    async regrasAtivas() {
+      return chamar(client.rpc("flow_active_code_rules"), "carregar regras vigentes");
+    },
+
+    async criarVersao(dados, arquivo) {
+      const criado = await chamar(client.rpc("flow_create_norm_version", {
+        p_norm_code: texto(dados.norm_code).toUpperCase(),
+        p_norm_title: texto(dados.norm_title),
+        p_revision: texto(dados.revision),
+        p_effective_date: dados.effective_date || null,
+        p_file_name: texto(arquivo && arquivo.name),
+        p_notes: texto(dados.notes),
+        p_rules: dados.rules || {},
+      }), "registrar revisão da norma");
+      if (criado.error || !arquivo) return criado;
+      const versao = criado.data;
+      const nomeSeguro = arquivo.name.replace(/[^\w.\- ]+/g, "_");
+      const caminho = `${versao.id}/${nomeSeguro}`;
+      const guardado = await chamar(
+        client.storage.from("flow-normas").upload(caminho, arquivo, { upsert: false }),
+        "guardar arquivo da norma"
+      );
+      if (guardado.error) {
+        await chamar(client.rpc("flow_fail_norm_version", {
+          target_version: versao.id, p_message: guardado.error,
+        }), "registrar falha da norma");
+        return { data: null, error: guardado.error };
+      }
+      const vinculo = await chamar(client.rpc("flow_set_norm_storage_path", {
+        target_version: versao.id, p_storage_path: caminho,
+      }), "vincular arquivo da norma");
+      return vinculo.error ? { data: null, error: vinculo.error } : criado;
+    },
+
+    async ativarVersao(id) {
+      return chamar(client.rpc("flow_activate_norm_version", { target_version: id }), "ativar norma");
+    },
+
+    async salvarCodigo(catalogo, codigo, rotulo, ativo = true) {
+      return chamar(client.rpc("flow_save_catalog_entry", {
+        p_catalog_code: texto(catalogo).toUpperCase(),
+        p_entry_code: texto(codigo).toUpperCase(),
+        p_label: texto(rotulo),
+        p_active: Boolean(ativo),
+      }), "salvar código da qualidade");
+    },
+
+    async listarCodigos(catalogo) {
+      return chamar(client.rpc("flow_list_catalog_entries", {
+        p_catalog_code: texto(catalogo).toUpperCase(),
+      }), "listar códigos da qualidade");
     },
   };
 
@@ -564,6 +638,16 @@
         "marcar notificação"
       );
     },
+    assinar(fn) {
+      if (!state.session || typeof fn !== "function") return () => {};
+      const userId = state.session.user.id;
+      const canal = client.channel(`flow-notificacoes-${userId}`)
+        .on("postgres_changes", {
+          event: "INSERT", schema: "public", table: "flow_notifications", filter: `user_id=eq.${userId}`,
+        }, (evento) => fn(evento.new || {}))
+        .subscribe();
+      return () => { client.removeChannel(canal); };
+    },
   };
 
   const usuarios = {
@@ -581,7 +665,7 @@
     },
     async ativar(userId, ativo) {
       return chamar(
-        client.from("flow_profiles").update({ active: ativo }).eq("id", userId),
+        client.rpc("flow_set_user_active", { target_user: userId, p_active: Boolean(ativo) }),
         "ativar usuário"
       );
     },
@@ -660,7 +744,7 @@
   };
 
   root.FlowApi = Object.freeze({
-    client, config, auth, tipos, solicitacoes, itens, triagem, lds,
+    client, config, auth, tipos, solicitacoes, itens, triagem, lds, normas,
     comentarios, anexos, historico, notificacoes, usuarios, acesso, exportacao,
   });
 })(window);

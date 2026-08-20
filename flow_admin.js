@@ -373,7 +373,7 @@
         ])
       ));
       if (!atual.length) {
-        etiquetas.append(elemento("span", { style: "font-size:.82rem;color:var(--text-3)", text: "Nenhum domínio — o cadastro está aberto a qualquer e-mail." }));
+        etiquetas.append(elemento("span", { style: "font-size:.82rem;color:var(--text-3)", text: "Nenhum domínio — novos solicitantes ficam bloqueados; apenas e-mails autorizados individualmente podem entrar." }));
       }
     };
     desenhar();
@@ -397,7 +397,7 @@
         elemento("p", { text: "Só e-mails destes domínios conseguem se cadastrar. Eles entram como solicitantes e veem apenas o formulário e os próprios pedidos." }),
       ]),
       atual.length ? null : elemento("div", { class: "flow-aviso atencao", text:
-        "Enquanto não houver nenhum domínio aqui, qualquer pessoa da internet pode criar conta no GRCON Flow." }),
+        "Enquanto não houver domínio, o cadastro de solicitantes fica fechado. Isso evita abrir o aplicativo por engano." }),
       etiquetas,
       elemento("div", { class: "flow-filtros", style: "margin:.6rem 0 0" }, [
         elemento("label", { class: "flow-campo busca", for: "dominio-novo" }, [
@@ -442,7 +442,7 @@
     if (!lista.length) {
       corpo.append(elemento("tr", {}, [
         elemento("td", { colspan: "4", style: "color:var(--text-3)", text:
-          "Ninguém autorizado ainda. Enquanto isso, todo mundo que se cadastrar entra como solicitante." }),
+          "Ninguém autorizado individualmente. Os domínios acima continuam valendo apenas para solicitantes." }),
       ]));
     }
 
