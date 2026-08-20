@@ -863,6 +863,7 @@
     { chave: "lds", rotulo: "Base de LDs", admin: true },
     { chave: "tipos", rotulo: "Tipos de solicitação", admin: true },
     { chave: "usuarios", rotulo: "Usuários", admin: true },
+    { chave: "acesso", rotulo: "Acesso", admin: true },
   ];
 
   function renderAba() {
@@ -887,6 +888,8 @@
       root.FlowAdmin.montarTipos(conteudo, estado.tipos, recarregarTipos);
     } else if (estado.aba === "usuarios") {
       root.FlowAdmin.montarUsuarios(conteudo);
+    } else if (estado.aba === "acesso") {
+      root.FlowAdmin.montarAcesso(conteudo);
     }
   }
 

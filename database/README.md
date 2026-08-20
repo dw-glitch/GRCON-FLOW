@@ -17,6 +17,8 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_07_operations_and_storage` | Operações do painel, view de exportação, buckets |
 | `flow_08_seed_types` | Os 11 tipos iniciais e seus campos |
 | `flow_09_hardening` | RLS no contador, extensões fora do `public`, revogação do acesso anônimo |
+| `flow_10_acesso` | Domínios autorizados, lista de e-mails da equipe, hook de cadastro |
+| `flow_11_espelho_allowlist` | Mantém a lista de acesso coerente com os papéis |
 
 ## Tabelas
 
@@ -35,8 +37,14 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_lds` | As LDs cadastradas (LD_001, LD_004, Comissionamento…). |
 | `flow_ld_versions` | Cada revisão publicada, ativa ou não. |
 | `flow_ld_documents` | Documentos indexados de cada versão. É a base das consultas. |
-| `flow_settings` | Configurações gerais. |
+| `flow_settings` | Configurações gerais, inclusive os domínios autorizados. |
+| `flow_access_allowlist` | E-mails da equipe e o papel de cada um. Admin-only. |
 | `flow_protocol_counters` | Numeração do protocolo. Sem policy: só a função a alcança. |
+
+Os **domínios** ficam em `flow_settings` porque o domínio de e-mail de uma
+empresa não é segredo — e essa tabela é legível por qualquer autenticado. Já a
+lista de **pessoas** fica em tabela própria, admin-only: essa sim revelaria quem
+é da equipe.
 
 `flow_export_view` junta solicitação e item para a exportação, com
 `security_invoker` — cada um enxerga nela apenas o que já poderia ver.
@@ -71,7 +79,32 @@ se alcança nem a lista de tipos.
 | `flow_activate_ld_version(versao)` | Ativa a revisão e inativa a anterior. |
 | `flow_update_items(...)` / `flow_update_request(...)` | Alterações do painel, com histórico. |
 | `flow_track_protocol(protocolo)` | Acompanhamento — devolve só o que o solicitante pode ver. |
-| `flow_set_user_role(user, papel)` | Troca de papel, com as regras de quem pode. |
+| `flow_set_user_role(user, papel)` | Troca de papel, com as regras de quem pode; espelha na lista de acesso. |
+| `flow_acesso_para(email)` | A regra de quem entra e com que papel. Uso interno. |
+| `flow_antes_de_criar_usuario(event)` | Hook do Auth. Recusa com mensagem legível. |
+| `flow_definir_acesso(email, papel)` | Autoriza um e-mail; promove na hora quem já tem conta. |
+| `flow_remover_acesso(email)` | Tira da lista. **Não rebaixa** quem já entrou. |
+| `flow_definir_dominios(dominios[])` | Domínios que podem criar conta. |
+
+### Quem entra, e como
+
+`flow_acesso_para()` é a regra, num lugar só — o hook e o gatilho a consultam, em
+vez de cada um ter a sua cópia:
+
+1. e-mail na lista → entra com o papel de lá (**passa por cima do domínio**);
+2. domínio autorizado → entra como `solicitante`;
+3. nenhum domínio configurado → entra como `solicitante` (projeto recém-criado);
+4. caso contrário → recusado.
+
+O primeiro usuário do sistema entra como `proprietario` sem passar por nada
+disso — é o bootstrap, e a decisão é serializada com `pg_advisory_xact_lock` para
+que dois cadastros simultâneos não se vejam ambos como "o primeiro".
+
+**O hook precisa ser ativado no painel** (*Authentication → Hooks → Before User
+Created*). Ele existe porque o GoTrue não propaga a mensagem de um
+`raise exception` em gatilho de `auth.users`: devolveria
+`Database error saving new user`. Sem o hook o cadastro continua barrado pelo
+gatilho, só que sem explicar o motivo.
 
 ## Normalização dos códigos
 
