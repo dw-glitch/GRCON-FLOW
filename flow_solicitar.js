@@ -156,8 +156,8 @@
     const bloco = elemento("section", { class: "flow-card" });
 
     const explicacao = tipo.requires_document
-      ? "Informe os documentos deste pedido. Você pode colar a lista, escolher os arquivos ou arrastá-los para cá."
-      : "Se você tiver os códigos ou os arquivos, informe aqui. Se não tiver, pode deixar em branco — descreva o pedido abaixo e nós identificamos.";
+      ? "Informe os códigos dos documentos deste pedido. Os arquivos correspondentes podem ser anexados logo abaixo."
+      : "Se você tiver os códigos, informe aqui. Se não tiver, pode deixar em branco — descreva o pedido e nós identificamos.";
 
     bloco.append(elemento("div", { class: "flow-card-head" }, [
       elemento("h3", {}, [
@@ -167,33 +167,9 @@
       elemento("p", { text: explicacao }),
     ]));
 
-    const entradaArquivos = elemento("input", { type: "file", multiple: true, hidden: true, id: "sol-arquivos" });
-    const area = elemento("div", {
-      class: "flow-drop", tabindex: "0", role: "button",
-      "aria-label": "Escolher ou arrastar arquivos",
-      onclick: () => entradaArquivos.click(),
-      onkeydown: (evento) => {
-        if (evento.key === "Enter" || evento.key === " ") { evento.preventDefault(); entradaArquivos.click(); }
-      },
-    }, [
-      icone("upload"),
-      elemento("strong", { text: "Arraste os arquivos aqui" }),
-      elemento("span", { text: "ou clique para escolher. O código sai do nome do arquivo, quando ele tiver um." }),
-      entradaArquivos,
-    ]);
-
-    ["dragenter", "dragover"].forEach((evento) => area.addEventListener(evento, (e) => {
-      e.preventDefault(); area.classList.add("sobre");
-    }));
-    ["dragleave", "drop"].forEach((evento) => area.addEventListener(evento, (e) => {
-      e.preventDefault(); area.classList.remove("sobre");
-    }));
-    area.addEventListener("drop", (evento) => receberArquivos(evento.dataTransfer.files));
-    entradaArquivos.addEventListener("change", () => { receberArquivos(entradaArquivos.files); entradaArquivos.value = ""; });
-
     const colar = elemento("textarea", {
       id: "sol-colar", rows: "3", placeholder:
-        "Ou cole os códigos, um por linha.\nC1O_RNEST_U32_3.1.1.1_INS_RIR_SPE-AST-320019\n5290.00-22313-91A-C1O-004",
+        "Cole os códigos, um por linha.\nC1O_RNEST_U32_3.1.1.1_INS_RIR_SPE-AST-320019\n5290.00-22313-91A-C1O-004",
     });
 
     const acoes = elemento("div", { class: "flow-acoes" }, [
@@ -211,25 +187,106 @@
 
     const lista = elemento("div", { class: "flow-itens", id: "sol-lista" });
 
-    bloco.append(area, elemento("label", { class: "flow-campo", for: "sol-colar" }, [
-      elemento("span", { text: "Ou cole a lista de códigos" }), colar,
+    bloco.append(elemento("label", { class: "flow-campo", for: "sol-colar" }, [
+      elemento("span", { text: "Lista de códigos" }), colar,
     ]), acoes, lista);
 
     desenharLista(lista, acoes.querySelector("#sol-contagem"));
     return bloco;
   }
 
+  function tamanhoArquivo(bytes) {
+    const tamanho = Number(bytes) || 0;
+    if (tamanho < 1024 * 1024) return `${Math.max(1, Math.round(tamanho / 1024))} KB`;
+    return `${(tamanho / (1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
+  }
+
+  /** Anexos são independentes dos códigos e ficam disponíveis em todo pedido. */
+  function montarAnexos() {
+    const entradaArquivos = elemento("input", {
+      type: "file", multiple: true, hidden: true, id: "sol-arquivos",
+      accept: Api.anexos.accept,
+    });
+    const area = elemento("div", {
+      class: "flow-drop", tabindex: "0", role: "button",
+      "aria-label": "Escolher ou arrastar anexos em PDF, Excel ou Word",
+      onclick: () => entradaArquivos.click(),
+      onkeydown: (evento) => {
+        if (evento.key === "Enter" || evento.key === " ") { evento.preventDefault(); entradaArquivos.click(); }
+      },
+    }, [
+      icone("upload"),
+      elemento("strong", { text: "Arraste os anexos aqui" }),
+      elemento("span", { text: `PDF, Excel ou Word · até ${Api.config.uploadMaxMb || 25} MB por arquivo.` }),
+      entradaArquivos,
+    ]);
+
+    ["dragenter", "dragover"].forEach((evento) => area.addEventListener(evento, (e) => {
+      e.preventDefault(); area.classList.add("sobre");
+    }));
+    ["dragleave", "drop"].forEach((evento) => area.addEventListener(evento, (e) => {
+      e.preventDefault(); area.classList.remove("sobre");
+    }));
+    area.addEventListener("drop", (evento) => receberArquivos(evento.dataTransfer.files));
+    entradaArquivos.addEventListener("change", () => {
+      receberArquivos(entradaArquivos.files);
+      entradaArquivos.value = "";
+    });
+
+    const lista = elemento("div", { class: "flow-itens" });
+    estado.anexos.forEach((arquivo, indice) => {
+      const extensao = texto(arquivo.name).split(".").pop().toUpperCase();
+      lista.append(elemento("div", { class: "flow-item" }, [
+        elemento("span", { class: "flow-item-num", text: "📎" }),
+        elemento("span", { class: "flow-item-corpo" }, [
+          elemento("code", { text: arquivo.name }),
+          elemento("em", { text: `${extensao} · ${tamanhoArquivo(arquivo.size)}` }),
+        ]),
+        elemento("button", {
+          class: "text-button danger", type: "button", text: "Remover",
+          "aria-label": `Remover anexo ${arquivo.name}`,
+          onclick: () => { estado.anexos.splice(indice, 1); render(); },
+        }),
+      ]));
+    });
+
+    return elemento("section", { class: "flow-card" }, [
+      elemento("div", { class: "flow-card-head" }, [
+        elemento("h3", { text: "Anexos" }),
+        elemento("p", { text: "Opcional. Os arquivos ficam privados e disponíveis para download somente por quem tem acesso à solicitação." }),
+      ]),
+      area,
+      estado.anexos.length ? lista : null,
+    ]);
+  }
+
   function receberArquivos(arquivos) {
     const lista = Array.from(arquivos || []);
     if (!lista.length) return;
-    const limite = (Api.config.uploadMaxMb || 25) * 1024 * 1024;
-    const grandes = lista.filter((arquivo) => arquivo.size > limite);
-    if (grandes.length) {
-      avisar(`${grandes.length} arquivo(s) passaram de ${Api.config.uploadMaxMb || 25} MB e não foram anexados.`, "erro");
-    }
-    const aceitos = lista.filter((arquivo) => arquivo.size <= limite);
+    const existentes = new Set(estado.anexos.map((arquivo) =>
+      `${arquivo.name}\u0000${arquivo.size}\u0000${arquivo.lastModified || 0}`));
+    const aceitos = [];
+    const erros = [];
+    lista.forEach((arquivo) => {
+      const erro = Api.anexos.validar(arquivo);
+      const chave = `${arquivo.name}\u0000${arquivo.size}\u0000${arquivo.lastModified || 0}`;
+      if (erro) erros.push(erro);
+      else if (existentes.has(chave)) erros.push(`“${arquivo.name}” já foi anexado.`);
+      else { existentes.add(chave); aceitos.push(arquivo); }
+    });
+    if (erros.length) avisar(erros.join(" "), "erro");
+    if (!aceitos.length) return;
     estado.anexos = estado.anexos.concat(aceitos);
-    acrescentar(Docs.deArquivos(aceitos));
+
+    // Nos tipos documentais, um código reconhecido no nome do arquivo também
+    // entra na relação de itens; o arquivo continua sendo um anexo separado.
+    if (estado.tipo && estado.tipo.allows_documents) {
+      const extraidos = Docs.deArquivos(aceitos).filter((item) => item.document);
+      const resultado = Docs.semRepetidos(estado.documentos.concat(extraidos));
+      estado.documentos = resultado.itens;
+      if (resultado.removidos.length) avisar(`${resultado.removidos.length} código(s) repetido(s) foram descartados.`);
+    }
+    render();
   }
 
   function acrescentar(novos) {
@@ -312,6 +369,7 @@
     }
 
     if (tipo.allows_documents) blocos.push(montarDocumentos());
+    blocos.push(montarAnexos());
 
     // Observações. Sempre presente: é onde cabe o que o formulário não previu.
     blocos.push(elemento("section", { class: "flow-card" }, [
@@ -474,6 +532,53 @@
     return partes.join("\n");
   }
 
+  async function enviarAnexos(requestId, arquivos) {
+    const resultado = { enviados: [], falhas: [] };
+    for (let indice = 0; indice < arquivos.length; indice += 1) {
+      const arquivo = arquivos[indice];
+      const andamento = document.getElementById("sol-anexos-envio");
+      if (andamento) {
+        andamento.className = "flow-carregando";
+        andamento.replaceChildren();
+        andamento.textContent = `Enviando anexo ${indice + 1} de ${arquivos.length}: ${arquivo.name}`;
+      }
+      const retorno = await Api.anexos.enviar(requestId, arquivo);
+      if (retorno.error) resultado.falhas.push({ arquivo, erro: retorno.error });
+      else resultado.enviados.push({ arquivo });
+    }
+    return resultado;
+  }
+
+  function mostrarResultadoAnexos(requestId, resultado) {
+    const destino = document.getElementById("sol-anexos-envio");
+    if (!destino) return;
+    destino.replaceChildren();
+
+    if (!resultado.falhas.length) {
+      destino.className = "flow-aviso ok";
+      destino.textContent = `${resultado.enviados.length} anexo(s) enviado(s) com sucesso.`;
+      return;
+    }
+
+    destino.className = "flow-aviso atencao";
+    destino.append(
+      elemento("strong", { text: `${resultado.enviados.length} anexo(s) enviado(s); ${resultado.falhas.length} falharam.` }),
+      elemento("p", { text: "A solicitação foi registrada normalmente. Tente novamente somente os arquivos abaixo:" }),
+      elemento("ul", {}, resultado.falhas.map(({ arquivo, erro }) =>
+        elemento("li", { text: `${arquivo.name}: ${erro}` })))
+    );
+    destino.append(elemento("button", {
+      class: "secondary-button compact", type: "button", text: "Tentar anexos novamente",
+      onclick: async (evento) => {
+        evento.currentTarget.disabled = true;
+        const novaTentativa = await enviarAnexos(requestId, resultado.falhas.map(({ arquivo }) => arquivo));
+        resultado.enviados.push(...novaTentativa.enviados);
+        resultado.falhas = novaTentativa.falhas;
+        mostrarResultadoAnexos(requestId, resultado);
+      },
+    }));
+  }
+
   async function enviar() {
     if (estado.enviando) return;
     estado.enviando = true;
@@ -505,32 +610,31 @@
       return;
     }
 
-    // A solicitação já está registrada. O que vem depois é acabamento: se
-    // falhar, o pedido continua de pé e a equipe resolve pelo painel.
-    mostrarRecibo(data);
+    // O protocolo aparece imediatamente. Os anexos e a triagem continuam com
+    // resultado visível, sem transformar uma falha de arquivo em perda do pedido.
+    const arquivos = [...estado.anexos];
+    mostrarRecibo(data, arquivos.length);
+    const triagemPendente = data.uses_ld
+      ? Api.triagem.solicitacao(data.id)
+      : Promise.resolve({ data: null, error: null });
+    const resultadoAnexos = arquivos.length
+      ? await enviarAnexos(data.id, arquivos)
+      : { enviados: [], falhas: [] };
+    if (arquivos.length) mostrarResultadoAnexos(data.id, resultadoAnexos);
+    const triagem = await triagemPendente;
 
-    const pendencias = [];
-    if (estado.anexos.length) {
-      pendencias.push((async () => {
-        for (const arquivo of estado.anexos) {
-          const resultado = await Api.anexos.enviar(data.id, arquivo);
-          if (resultado.error) console.warn("[GRCON Flow] anexo não enviado:", arquivo.name, resultado.error);
-        }
-      })());
-    }
-    if (data.uses_ld) pendencias.push(Api.triagem.solicitacao(data.id));
-
-    await Promise.allSettled(pendencias);
     const aviso = document.getElementById("sol-pos-envio");
     if (aviso) {
-      aviso.className = "flow-aviso ok";
-      aviso.textContent = data.uses_ld
-        ? "Triagem concluída. A equipe já vê o resultado no painel."
-        : "Pedido encaminhado para a equipe.";
+      aviso.className = triagem.error ? "flow-aviso atencao" : "flow-aviso ok";
+      aviso.textContent = triagem.error
+        ? `Pedido encaminhado, mas a triagem automática não terminou: ${triagem.error}`
+        : data.uses_ld
+          ? "Triagem concluída. A equipe já vê o resultado no painel."
+          : "Pedido encaminhado para a equipe.";
     }
   }
 
-  function mostrarRecibo(resultado) {
+  function mostrarRecibo(resultado, quantidadeAnexos = 0) {
     estado.enviando = false;
     const conteudo = elemento("div", { class: "flow-card" }, [
       elemento("div", { class: "flow-recibo" }, [
@@ -544,6 +648,10 @@
           class: "flow-carregando", id: "sol-pos-envio",
           text: resultado.uses_ld ? "Consultando as LDs vigentes…" : "Encaminhando para a equipe…",
         }),
+        quantidadeAnexos ? elemento("div", {
+          class: "flow-carregando", id: "sol-anexos-envio",
+          text: `Preparando ${quantidadeAnexos} anexo(s)…`,
+        }) : null,
         elemento("div", { class: "flow-acoes", style: "justify-content:center;margin-top:1.2rem" }, [
           elemento("a", { class: "primary-button", href: `/acompanhar?protocolo=${encodeURIComponent(resultado.protocol)}`, text: "Acompanhar esta solicitação" }),
           elemento("button", {

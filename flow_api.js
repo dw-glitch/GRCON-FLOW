@@ -27,6 +27,26 @@
     return valor === null || valor === undefined ? "" : String(valor).trim();
   }
 
+  // O bucket continua privado; esta lista define o contrato do formulário.
+  // A extensão é a fonte mais estável aqui porque alguns navegadores não
+  // informam o MIME de arquivos do Office (ou informam application/octet-stream).
+  const EXTENSOES_ANEXO = Object.freeze(["pdf", "xls", "xlsx", "xlsm", "doc", "docx"]);
+  const ACEITE_ANEXO = EXTENSOES_ANEXO.map((extensao) => `.${extensao}`).join(",");
+
+  function validarAnexo(arquivo) {
+    if (!arquivo || !texto(arquivo.name)) return "Escolha um arquivo válido.";
+    const extensao = texto(arquivo.name).toLowerCase().split(".").pop();
+    if (!EXTENSOES_ANEXO.includes(extensao)) {
+      return `“${arquivo.name}” não é PDF, Excel ou Word.`;
+    }
+    if (!Number(arquivo.size)) return `“${arquivo.name}” está vazio.`;
+    const limiteMb = config.uploadMaxMb || 25;
+    if (arquivo.size > limiteMb * 1024 * 1024) {
+      return `“${arquivo.name}” tem mais de ${limiteMb} MB.`;
+    }
+    return null;
+  }
+
   /**
    * Erro do Supabase vira mensagem que uma pessoa entende. A mensagem original
    * fica no console: a tela não deve despejar jargão de banco em quem só quis
@@ -598,11 +618,13 @@
   };
 
   const anexos = {
+    extensoes: EXTENSOES_ANEXO,
+    accept: ACEITE_ANEXO,
+    validar: validarAnexo,
+
     async enviar(requestId, arquivo, itemId = null) {
-      const limite = (config.uploadMaxMb || 25) * 1024 * 1024;
-      if (arquivo.size > limite) {
-        return { error: `“${arquivo.name}” tem mais de ${config.uploadMaxMb || 25} MB.` };
-      }
+      const erroArquivo = validarAnexo(arquivo);
+      if (erroArquivo) return { data: null, error: erroArquivo };
       const nomeSeguro = arquivo.name.replace(/[^\w.\- ]+/g, "_");
       const caminho = `${requestId}/${Date.now()}-${nomeSeguro}`;
       const { error } = await chamar(
@@ -610,7 +632,7 @@
         "enviar anexo"
       );
       if (error) return { error };
-      return chamar(
+      const registro = await chamar(
         client.from("flow_attachments").insert({
           request_id: requestId,
           item_id: itemId,
@@ -622,10 +644,25 @@
         }),
         "registrar anexo"
       );
+      // Não deixa arquivo órfão no bucket se a gravação dos metadados falhar.
+      if (registro.error) await client.storage.from("flow-anexos").remove([caminho]);
+      return registro;
     },
+
     async link(caminho) {
       const { data } = await client.storage.from("flow-anexos").createSignedUrl(caminho, 300);
       return data ? data.signedUrl : null;
+    },
+
+    /** URL curta e privada, com Content-Disposition de download e nome original. */
+    async linkDownload(caminho, nomeArquivo) {
+      const { data, error } = await chamar(
+        client.storage.from("flow-anexos").createSignedUrl(caminho, 300, {
+          download: texto(nomeArquivo) || true,
+        }),
+        "preparar download do anexo"
+      );
+      return { data: data ? data.signedUrl : null, error };
     },
   };
 

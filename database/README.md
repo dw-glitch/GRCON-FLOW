@@ -24,6 +24,7 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_14_secure_owner_and_permissions` | Bootstrap por e-mail, perfis sem autoelevação e notificações da equipe |
 | `flow_15_seed_norm_versions` | Garante as revisões normativas iniciais em projetos já migrados |
 | `flow_16_norm_sources_and_files` | Corrige metadados, separa os anexos A–G da N-1710 e permite anexar PDFs às revisões iniciais |
+| `flow_17_request_attachments` | Completa os formatos de anexos do solicitante e mantém o bucket privado em 25 MB |
 
 ## Tabelas
 

@@ -18,6 +18,7 @@ próprios. Nenhuma tabela, chave ou URL do GRCON principal é usada.
 
 ```
 Solicitante → escolhe o serviço → formulário se adapta → envia
+     └── pode anexar PDF, Excel e Word
      ↓
 Solicitação REGISTRADA SEMPRE + protocolo FLOW-AAAA-NNNNNN
      ↓
@@ -68,6 +69,12 @@ a divergência é mostrada para alguém decidir.
 
 **Reprocessar não apaga.** Cada triagem é uma execução nova, registrada com a
 versão de LD que usou. A análise anterior permanece.
+
+**Anexos ficam privados.** Todo tipo de solicitação aceita vários arquivos PDF,
+Excel (`.xls`, `.xlsx`, `.xlsm`) e Word (`.doc`, `.docx`), com até 25 MB por
+arquivo. O solicitante vê o resultado de cada envio e pode tentar novamente se
+algum falhar. A equipe baixa o arquivo original na ficha da solicitação por um
+link temporário; o bucket não é público.
 
 ### Classificações
 

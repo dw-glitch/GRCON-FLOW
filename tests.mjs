@@ -423,6 +423,40 @@ check("toda nova solicitação notifica a equipe ativa em tempo real", () => {
   assert.match(api, /flow-notificacoes-/);
 });
 
+check("todo tipo de solicitação aceita anexos PDF, Excel e Word", () => {
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  ["pdf", "xls", "xlsx", "xlsm", "doc", "docx"].forEach((extensao) => {
+    assert.match(api, new RegExp(`EXTENSOES_ANEXO[^\\n]+[\"']${extensao}[\"']`),
+      `falta suporte a .${extensao}`);
+  });
+  assert.match(api, /validarAnexo\(arquivo\)/, "a API precisa validar antes do upload");
+  assert.match(api, /remove\(\[caminho\]\)/, "falha no registro não pode deixar arquivo órfão");
+
+  const solicitar = fs.readFileSync(path.join(root, "flow_solicitar.js"), "utf8");
+  assert.match(solicitar, /blocos\.push\(montarAnexos\(\)\)/,
+    "anexos precisam aparecer mesmo em tipos que não usam documentos");
+  assert.match(solicitar, /accept: Api\.anexos\.accept/);
+  assert.match(solicitar, /Tentar anexos novamente/,
+    "uma falha precisa ser visível e permitir nova tentativa");
+  assert.doesNotMatch(solicitar, /anexo não enviado[^\n]+console\.warn/,
+    "falha de anexo não pode ficar somente no console");
+  const migration = fs.readFileSync(path.join(root, "database/migrations/flow_17_request_attachments.sql"), "utf8");
+  assert.match(migration, /public = false/);
+  assert.match(migration, /file_size_limit = 26214400/);
+  assert.match(migration, /macroenabled\.12/i, "o bucket precisa aceitar Excel com macro");
+});
+
+check("o painel baixa o anexo privado mantendo o nome original", () => {
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /async linkDownload\(caminho, nomeArquivo\)/);
+  assert.match(api, /createSignedUrl\(caminho, 300, \{/);
+  assert.match(api, /download: texto\(nomeArquivo\) \|\| true/);
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /text: "Baixar"/);
+  assert.match(painel, /Api\.anexos\.linkDownload/);
+  assert.match(painel, /download: anexo\.file_name/);
+});
+
 check("a configuração publicada não carrega chave secreta", () => {
   const config = fs.readFileSync(path.join(root, "flow_config.js"), "utf8");
   assert.doesNotMatch(config, /sb_secret_/, "chave secreta jamais vai para o navegador");

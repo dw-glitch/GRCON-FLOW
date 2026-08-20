@@ -28,6 +28,13 @@
     carregando: false,
   };
 
+  function tamanhoArquivo(bytes) {
+    const tamanho = Number(bytes) || 0;
+    if (!tamanho) return "tamanho não informado";
+    if (tamanho < 1024 * 1024) return `${Math.max(1, Math.round(tamanho / 1024))} KB`;
+    return `${(tamanho / (1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
+  }
+
   // ---------------------------------------------------------------------------
   // Colunas dos itens — é aqui que o painel muda conforme o pedido
   // ---------------------------------------------------------------------------
@@ -292,15 +299,32 @@
     if ((data.anexos || []).length) {
       const lista = elemento("div", { class: "flow-itens" });
       data.anexos.forEach((anexo) => {
+        const extensao = texto(anexo.file_name).split(".").pop().toUpperCase();
         lista.append(elemento("div", { class: "flow-item" }, [
           elemento("span", { class: "flow-item-num", text: "📎" }),
-          elemento("span", { class: "flow-item-corpo" }, [elemento("code", { text: anexo.file_name })]),
+          elemento("span", { class: "flow-item-corpo" }, [
+            elemento("code", { text: anexo.file_name }),
+            elemento("em", { text: `${extensao} · ${tamanhoArquivo(anexo.size_bytes)}` }),
+          ]),
           elemento("button", {
-            class: "text-button", type: "button", text: "Abrir",
-            onclick: async () => {
-              const url = await Api.anexos.link(anexo.storage_path);
-              if (url) root.open(url, "_blank", "noopener");
-              else avisar("Não foi possível gerar o link do anexo.", "erro");
+            class: "text-button", type: "button", text: "Baixar",
+            onclick: async (evento) => {
+              const botao = evento.currentTarget;
+              botao.disabled = true;
+              botao.textContent = "Preparando…";
+              const { data: url, error: erroDownload } = await Api.anexos.linkDownload(
+                anexo.storage_path, anexo.file_name
+              );
+              if (erroDownload || !url) {
+                avisar(erroDownload || "Não foi possível preparar o download do anexo.", "erro");
+              } else {
+                const link = elemento("a", { href: url, download: anexo.file_name, hidden: true });
+                document.body.append(link);
+                link.click();
+                link.remove();
+              }
+              botao.disabled = false;
+              botao.textContent = "Baixar";
             },
           }),
         ]));
