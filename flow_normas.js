@@ -15,7 +15,12 @@
 
   const CATALOGOS = [
     ["TIPOS_RELATORIO", "Tipos de relatório — ET Rev. Q"],
-    ["CATEGORIAS_N1710", "Categorias documentais — N-1710"],
+    ["CATEGORIAS_N1710", "Categorias documentais — N-1710 Anexo A"],
+    ["INSTALACOES_N1710", "Instalações — N-1710 Anexo B"],
+    ["AREAS_ATIVIDADE_N1710", "Áreas de atividade — N-1710 Anexo C"],
+    ["CLASSES_SERVICO_N1710", "Classes de serviço — N-1710 Anexo D"],
+    ["AREAS_ATIVIDADE_NAVAL_N1710", "Áreas navais — N-1710 Anexo E"],
+    ["CLASSES_SERVICO_NAVAL_N1710", "Classes navais — N-1710 Anexo F"],
     ["DISCIPLINAS_RELATORIO", "Disciplinas de relatório — ET Rev. Q"],
     ["EMISSORES_RELATORIO", "Emissores autorizados"],
     ["UNIDADES_RELATORIO", "Unidades autorizadas"],
@@ -48,7 +53,7 @@
         }
         if (!pdf) { avisar("Anexe o PDF controlado desta revisão.", "erro"); return; }
         botao.disabled = true;
-        const { error } = await Api.normas.criarVersao({
+        const { data, error } = await Api.normas.criarVersao({
           norm_code: codigo.value,
           norm_title: titulo.value,
           revision: revisao.value,
@@ -57,7 +62,14 @@
         }, pdf);
         botao.disabled = false;
         if (error) { avisar(error, "erro"); return; }
-        avisar("Revisão registrada como rascunho. Ative-a depois da conferência.", "ok");
+        avisar(
+          data && data.status === "ativa"
+            ? "PDF anexado à revisão vigente."
+            : data && data.status === "substituida"
+              ? "PDF anexado à revisão histórica."
+              : "Revisão registrada como rascunho. Ative-a depois da conferência.",
+          "ok"
+        );
         await carregar();
       },
     });
@@ -95,8 +107,17 @@
           ].filter(Boolean).join(" · ") }),
           versao.notes ? elemento("em", { text: versao.notes }) : null,
         ]),
-        versao.status !== "ativa" && versao.status !== "erro"
-          ? elemento("button", {
+        elemento("span", { class: "flow-acoes" }, [
+          versao.storage_path ? elemento("button", {
+            class: "text-button", type: "button", text: "Abrir PDF",
+            onclick: async () => {
+              const { data, error } = await Api.normas.urlArquivo(versao.storage_path);
+              if (error || !data) { avisar(error || "Não foi possível abrir o PDF.", "erro"); return; }
+              window.open(data, "_blank", "noopener,noreferrer");
+            },
+          }) : null,
+          versao.status !== "ativa" && versao.status !== "erro"
+            ? elemento("button", {
               class: "text-button", type: "button", text: "Ativar",
               onclick: async () => {
                 if (!Ui.confirmar(`Ativar a revisão ${versao.revision} de ${norma.code}? As próximas análises passarão a usar essa regra.`)) return;
@@ -106,6 +127,7 @@
                 await carregar();
               },
             }) : null,
+        ]),
       ]));
     });
     return elemento("section", { class: "flow-card" }, [

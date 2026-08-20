@@ -132,7 +132,10 @@ versão usou.
 Em **Painel → Normas e códigos**, o proprietário mantém normas, revisões e os
 catálogos usados na validação. Uma nova revisão nasce como rascunho e só passa a
 reger as próximas LDs quando for ativada explicitamente; a anterior continua no
-histórico.
+histórico. Revisões pré-cadastradas aceitam o vínculo posterior do PDF sem criar
+duplicidade, e o arquivo controlado pode ser aberto pelo painel. Na N-1710, o
+texto principal e os anexos A–G aparecem separadamente porque cada parte possui
+seu próprio ciclo de revisão.
 
 ---
 

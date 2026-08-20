@@ -23,6 +23,7 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_13_versioned_norms` | Normas, revisões, catálogos versionados e bucket de PDFs controlados |
 | `flow_14_secure_owner_and_permissions` | Bootstrap por e-mail, perfis sem autoelevação e notificações da equipe |
 | `flow_15_seed_norm_versions` | Garante as revisões normativas iniciais em projetos já migrados |
+| `flow_16_norm_sources_and_files` | Corrige metadados, separa os anexos A–G da N-1710 e permite anexar PDFs às revisões iniciais |
 
 ## Tabelas
 
@@ -44,7 +45,7 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_settings` | Configurações gerais, inclusive os domínios autorizados. |
 | `flow_access_allowlist` | E-mails da equipe e o papel de cada um. Admin-only. |
 | `flow_protocol_counters` | Numeração do protocolo. Sem policy: só a função a alcança. |
-| `flow_norms` / `flow_norm_versions` | Norma e histórico de revisões, com uma vigente por código. |
+| `flow_norms` / `flow_norm_versions` | Norma e histórico de revisões, com uma vigente por código. Texto e anexos da N-1710 têm controle independente. |
 | `flow_norm_catalog_entries` | Histórico append-only dos códigos usados na validação das LDs. |
 | `flow_owner_bootstrap` | E-mail único autorizado a criar o primeiro proprietário. Não é exposto à API. |
 

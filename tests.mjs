@@ -367,6 +367,44 @@ check("normas e catálogos são administráveis e versionados", () => {
   assert.match(migration, /TIPOS_RELATORIO/);
 });
 
+check("texto e anexos da N-1710 preservam revisões independentes", () => {
+  const migration = fs.readFileSync(path.join(root, "database/migrations/flow_16_norm_sources_and_files.sql"), "utf8");
+  const esperadas = [
+    ["A", "W"], ["B", "CJ"], ["C", "BF"], ["D", "BG"],
+    ["E", "D"], ["F", "G"], ["G", "CN"],
+  ];
+  esperadas.forEach(([anexo, revisao]) => {
+    assert.match(migration, new RegExp(`N-1710-ANEXO-${anexo}[^\\n]+['\"]${revisao}['\"]`),
+      `falta a revisão ${revisao} do Anexo ${anexo}`);
+  });
+  assert.match(migration, /Formulários para Emissão de Documentos Técnicos de Engenharia/,
+    "o título da N-381 precisa acompanhar a capa fornecida");
+});
+
+check("PDF pode completar uma revisão normativa pré-cadastrada", () => {
+  const migration = fs.readFileSync(path.join(root, "database/migrations/flow_16_norm_sources_and_files.sql"), "utf8");
+  assert.match(migration, /on conflict \(norm_id,revision\) do update/i);
+  assert.match(migration, /where btrim\(coalesce\(flow_norm_versions\.storage_path,''\)\)=''/i);
+  assert.match(migration, /status in \('rascunho','ativa','substituida'\)/i,
+    "vigentes e históricas sem PDF precisam aceitar o vínculo");
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /createSignedUrl\(seguro, 600\)/,
+    "o PDF privado precisa abrir por URL temporária");
+});
+
+check("catálogos refletem os anexos da N-1710 e não misturam CT ou SIT", () => {
+  const migration = fs.readFileSync(path.join(root, "database/migrations/flow_16_norm_sources_and_files.sql"), "utf8");
+  ["INSTALACOES_N1710", "AREAS_ATIVIDADE_N1710", "CLASSES_SERVICO_N1710",
+    "AREAS_ATIVIDADE_NAVAL_N1710", "CLASSES_SERVICO_NAVAL_N1710"].forEach((catalogo) => {
+    assert.match(migration, new RegExp(catalogo), `falta o catálogo ${catalogo}`);
+  });
+  assert.match(migration, /\('CT','Consulta Técnica[^\n]+false\)/);
+  assert.match(migration, /\('SIT','Solicitação de Informação Técnica[^\n]+false\)/);
+  const normas = fs.readFileSync(path.join(root, "flow_normas.js"), "utf8");
+  assert.match(normas, /Abrir PDF/);
+  assert.match(normas, /N-1710 Anexo F/);
+});
+
 check("o proprietário inicial depende de e-mail preparado, não de corrida pelo primeiro cadastro", () => {
   const migration = fs.readFileSync(path.join(root, "database/migrations/flow_14_secure_owner_and_permissions.sql"), "utf8");
   assert.match(migration, /flow_owner_bootstrap/);

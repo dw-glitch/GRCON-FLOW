@@ -506,6 +506,9 @@
     },
 
     async criarVersao(dados, arquivo) {
+      if (!arquivo || !/\.pdf$/i.test(texto(arquivo.name))) {
+        return { data: null, error: "Anexe um arquivo PDF da norma." };
+      }
       const criado = await chamar(client.rpc("flow_create_norm_version", {
         p_norm_code: texto(dados.norm_code).toUpperCase(),
         p_norm_title: texto(dados.norm_title),
@@ -533,6 +536,18 @@
         target_version: versao.id, p_storage_path: caminho,
       }), "vincular arquivo da norma");
       return vinculo.error ? { data: null, error: vinculo.error } : criado;
+    },
+
+    async urlArquivo(caminho) {
+      const seguro = texto(caminho);
+      if (!seguro) return { data: null, error: "Esta revisão ainda não possui PDF controlado." };
+      const resultado = await chamar(
+        client.storage.from("flow-normas").createSignedUrl(seguro, 600),
+        "abrir PDF da norma"
+      );
+      return resultado.error
+        ? { data: null, error: resultado.error }
+        : { data: resultado.data && resultado.data.signedUrl, error: null };
     },
 
     async ativarVersao(id) {
