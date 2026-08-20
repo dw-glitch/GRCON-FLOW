@@ -6,27 +6,41 @@
 @layer modules {
 
   /* ── Estrutura ─────────────────────────────────────────────────────────── */
-  .flow-body { min-height: 100vh; display: flex; flex-direction: column; background: var(--surface-0); }
+  .flow-body {
+    min-height: 100vh; display: flex; flex-direction: column;
+    background:
+      radial-gradient(circle at 92% -8%, rgb(20 121 166 / 9%), transparent 28rem),
+      var(--surface-0);
+  }
 
   .flow-topbar {
     position: sticky; top: 0; z-index: 30;
     display: flex; align-items: center; gap: var(--space-4);
-    padding: .7rem clamp(1rem, 3vw, 2rem);
-    background: var(--surface-1); border-bottom: 1px solid var(--border-1);
+    min-height: 4.25rem; padding: .65rem clamp(1rem, 3vw, 2rem);
+    background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+    border-bottom: 1px solid var(--border-1); backdrop-filter: blur(14px);
+    box-shadow: 0 1px 0 rgb(6 61 95 / 3%);
   }
-  .flow-brand { display: flex; align-items: center; gap: .7rem; min-width: 0; text-decoration: none; color: inherit; }
-  .flow-brand:hover strong { color: var(--brand-700); }
-  .flow-brand img { height: 34px; width: auto; }
-  .flow-brand strong { display: block; font-size: .98rem; color: var(--brand-strong); line-height: 1.15; }
-  .flow-brand span { display: block; font-size: .72rem; color: var(--text-3); }
+  .flow-brand { display: flex; align-items: center; gap: .65rem; min-width: 0; text-decoration: none; color: inherit; }
+  .flow-brand img { height: 36px; width: auto; }
+  .flow-product {
+    display: inline-grid; place-items: center; height: 1.55rem; padding: 0 .55rem;
+    border-left: 1px solid var(--border-2); color: var(--brand-800);
+    font-size: .68rem; font-weight: 850; letter-spacing: .13em; line-height: 1;
+  }
   .flow-topbar-spacer { flex: 1; }
   .flow-topbar nav { display: flex; gap: .25rem; flex-wrap: wrap; }
   .flow-topbar nav a {
-    padding: .45rem .8rem; border-radius: var(--radius-sm); text-decoration: none;
-    color: var(--text-2); font-size: .85rem; font-weight: 600;
+    display: inline-flex; align-items: center; gap: .42rem; min-height: 2.35rem;
+    padding: .45rem .75rem; border-radius: var(--radius-sm); text-decoration: none;
+    color: var(--text-2); font-size: .84rem; font-weight: 650;
   }
   .flow-topbar nav a:hover { background: var(--surface-3); color: var(--brand-800); }
-  .flow-topbar nav a[aria-current="page"] { background: var(--brand-100); color: var(--brand-800); }
+  .flow-topbar nav a[aria-current="page"] { background: var(--brand-100); color: var(--brand-800); box-shadow: inset 0 0 0 1px rgb(20 121 166 / 8%); }
+  .flow-nav-icon {
+    width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.8;
+    stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto;
+  }
 
   .flow-user { display: flex; align-items: center; gap: .5rem; }
   .flow-user-chip {
@@ -51,7 +65,8 @@
   /* ── Cartões e cabeçalhos ──────────────────────────────────────────────── */
   .flow-card {
     background: var(--surface-1); border: 1px solid var(--border-1);
-    border-radius: var(--radius-md); padding: clamp(1rem, 2.4vw, 1.5rem);
+    border-radius: var(--radius-lg); padding: clamp(1rem, 2.4vw, 1.5rem);
+    box-shadow: 0 1px 2px rgb(12 32 48 / 3%);
   }
   .flow-card + .flow-card { margin-top: var(--space-5); }
   .flow-card-head { margin-bottom: var(--space-4); }
@@ -59,9 +74,9 @@
   .flow-card-head h3 { margin: 0 0 .2rem; font-size: 1rem; color: var(--brand-strong); }
   .flow-card-head p { margin: 0; font-size: .82rem; color: var(--text-3); }
 
-  .flow-page-head { margin-bottom: var(--space-5); }
+  .flow-page-head { display: flex; align-items: end; justify-content: space-between; gap: 1rem; margin-bottom: var(--space-5); }
   .flow-page-head h1 { margin: 0 0 .25rem; font-size: clamp(1.4rem, 3vw, 1.9rem); }
-  .flow-page-head p { margin: 0; color: var(--text-2); }
+  .flow-page-head p { margin: 0; max-width: 42rem; color: var(--text-2); font-size: .88rem; }
 
   /* ── Formulário ────────────────────────────────────────────────────────── */
   .flow-grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
@@ -72,8 +87,9 @@
   .flow-campo > small { font-size: .74rem; color: var(--text-3); }
   .flow-campo .obrigatorio { color: #b4443a; margin-left: .15rem; }
   .flow-campo input, .flow-campo select, .flow-campo textarea {
-    width: 100%; padding: .55rem .7rem; border: 1px solid var(--border-1);
+    width: 100%; min-height: 2.7rem; padding: .58rem .75rem; border: 1px solid var(--border-1);
     border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-1);
+    transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
   }
   .flow-campo textarea { resize: vertical; min-height: 5rem; }
   .flow-campo input:focus-visible, .flow-campo select:focus-visible, .flow-campo textarea:focus-visible {
@@ -88,18 +104,21 @@
   .flow-tipos { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); }
   .flow-tipo {
     display: flex; gap: .7rem; align-items: flex-start; text-align: left;
-    padding: .9rem 1rem; border: 1px solid var(--border-1); border-radius: var(--radius-md);
-    background: var(--surface-1); cursor: pointer; min-height: 4.6rem;
+    padding: 1rem; border: 1px solid var(--border-1); border-radius: var(--radius-md);
+    background: var(--surface-1); cursor: pointer; min-height: 4.7rem;
     transition: border-color .15s, box-shadow .15s, background .15s;
   }
-  .flow-tipo:hover { border-color: var(--brand-600); background: var(--brand-50); }
+  .flow-tipo:hover { border-color: var(--brand-600); background: var(--brand-50); box-shadow: var(--shadow-1); transform: translateY(-1px); }
   .flow-tipo[aria-pressed="true"] {
     border-color: var(--brand-600); background: var(--brand-100);
     box-shadow: inset 3px 0 0 var(--brand-700);
   }
   .flow-tipo svg { flex: 0 0 22px; width: 22px; height: 22px; fill: none; stroke: var(--brand-700); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; margin-top: .1rem; }
   .flow-tipo b { display: block; font-size: .88rem; color: var(--text-1); }
-  .flow-tipo small { display: block; font-size: .75rem; color: var(--text-3); margin-top: .15rem; }
+  .flow-tipo small {
+    display: -webkit-box; margin-top: .15rem; overflow: hidden; -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2; font-size: .74rem; line-height: 1.35; color: var(--text-3);
+  }
 
   /* ── Etapas ────────────────────────────────────────────────────────────── */
   .flow-etapas { display: flex; gap: .5rem; list-style: none; margin: 0 0 var(--space-5); padding: 0; flex-wrap: wrap; }
@@ -141,14 +160,15 @@
   .flow-item-sem-codigo code { color: var(--text-3); font-style: italic; }
 
   /* ── Tabela ────────────────────────────────────────────────────────────── */
-  .flow-tabela-wrap { overflow-x: auto; border: 1px solid var(--border-1); border-radius: var(--radius-md); background: var(--surface-1); }
+  .flow-tabela-wrap { overflow: auto; max-height: calc(100vh - 19rem); border: 1px solid var(--border-1); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow-1); }
   .flow-tabela { width: 100%; border-collapse: collapse; font-size: .82rem; }
-  .flow-tabela th, .flow-tabela td { padding: .5rem .6rem; text-align: left; border-bottom: 1px solid var(--border-1); vertical-align: top; }
+  .flow-tabela th, .flow-tabela td { padding: .68rem .7rem; text-align: left; border-bottom: 1px solid var(--border-1); vertical-align: middle; }
   .flow-tabela thead th {
     position: sticky; top: 0; z-index: 1; background: var(--surface-3);
     font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); white-space: nowrap;
   }
-  .flow-tabela tbody tr:hover { background: var(--surface-2); }
+  .flow-tabela tbody tr { transition: background var(--transition); }
+  .flow-tabela tbody tr:hover { background: var(--brand-50); }
   .flow-tabela tbody tr.selecionada { background: var(--brand-50); }
   /* Código documental não quebra no meio: preferimos rolar a tabela a exibir
      "MA-5290.00-" numa linha e o resto na seguinte. */
@@ -200,7 +220,10 @@
   .flow-progresso small { font-size: .68rem; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
   /* ── Filtros e ações ───────────────────────────────────────────────────── */
-  .flow-filtros { display: flex; gap: .6rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: var(--space-4); }
+  .flow-filtros {
+    display: flex; gap: .65rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: var(--space-4);
+    padding: .75rem; border: 1px solid var(--border-1); border-radius: var(--radius-md); background: var(--surface-1);
+  }
   .flow-filtros .flow-campo { min-width: 9rem; }
   .flow-filtros .busca { flex: 1 1 16rem; }
   .flow-acoes { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
@@ -327,13 +350,22 @@
   .flow-confirmacao input { margin-top: .15rem; }
 
   /* ── Login ─────────────────────────────────────────────────────────────── */
-  .flow-login { min-height: 100vh; display: grid; place-items: center; padding: 1.5rem; background: var(--surface-0); }
-  .flow-login-card {
-    width: min(26rem, 100%); background: var(--surface-1); border: 1px solid var(--border-1);
-    border-radius: var(--radius-lg); padding: 1.8rem; box-shadow: var(--shadow-1);
+  .flow-login {
+    position: relative; isolation: isolate; min-height: 100vh; display: grid; place-items: center; padding: 1.5rem;
+    background:
+      radial-gradient(circle at 15% 12%, rgb(36 104 154 / 19%), transparent 27rem),
+      linear-gradient(145deg, var(--surface-0), var(--brand-50));
   }
-  .flow-login-card img { height: 40px; margin-bottom: 1.1rem; }
-  .flow-login-card h1 { font-size: 1.25rem; margin: 0 0 .3rem; }
+  .flow-login::before {
+    content: ""; position: fixed; z-index: -1; width: 32rem; height: 32rem; right: -12rem; bottom: -15rem;
+    border-radius: 50%; border: 5rem solid rgb(20 121 166 / 5%);
+  }
+  .flow-login-card {
+    width: min(27rem, 100%); background: color-mix(in srgb, var(--surface-1) 97%, transparent); border: 1px solid var(--border-1);
+    border-radius: var(--radius-xl); padding: clamp(1.5rem, 4vw, 2.1rem); box-shadow: var(--shadow-2);
+  }
+  .flow-login-card img { height: 46px; margin-bottom: 1.45rem; }
+  .flow-login-card h1 { font-size: 1.35rem; margin: 0 0 .3rem; }
   .flow-login-card > p { margin: 0 0 1.2rem; font-size: .84rem; color: var(--text-3); }
   .flow-login-card .flow-campo + .flow-campo { margin-top: .8rem; }
   .flow-login-card .primary-button { width: 100%; margin-top: 1.1rem; justify-content: center; }
@@ -376,8 +408,19 @@
   .flow-aba:hover { color: var(--brand-800); }
   .flow-aba[aria-selected="true"] { color: var(--brand-800); border-bottom-color: var(--brand-700); }
 
-  @media (max-width: 640px) {
+  @media (max-width: 760px) {
     .flow-evento { grid-template-columns: 1fr; gap: .1rem; }
-    .flow-topbar { flex-wrap: wrap; }
+    .flow-topbar { flex-wrap: wrap; gap: .55rem; padding-inline: .8rem; }
+    .flow-topbar-spacer { display: none; }
+    .flow-topbar nav { order: 3; width: 100%; display: grid; grid-template-columns: repeat(2, 1fr); }
+    .flow-topbar nav:has(a:nth-child(3)) { grid-template-columns: repeat(3, 1fr); }
+    .flow-topbar nav a { justify-content: center; padding-inline: .4rem; }
+    .flow-user { margin-left: auto; }
+    .flow-user .text-button { padding-inline: .35rem; }
+    .flow-page-head { display: block; }
+    .flow-filtros { padding: .65rem; }
+    .flow-filtros .flow-campo, .flow-filtros .busca { flex: 1 1 100%; }
+    .flow-tabela-wrap { max-height: none; }
+    .flow-footer { justify-content: center; text-align: center; }
   }
 }

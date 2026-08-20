@@ -101,8 +101,7 @@
 
     return elemento("section", { class: "flow-card" }, [
       elemento("div", { class: "flow-card-head" }, [
-        elemento("h2", { text: "O que você deseja solicitar?" }),
-        elemento("p", { text: "Escolha o serviço. O formulário se ajusta ao que aquele pedido realmente precisa." }),
+        elemento("h2", { text: "O que você precisa?" }),
       ]),
       grade,
     ]);
@@ -156,8 +155,8 @@
     const bloco = elemento("section", { class: "flow-card" });
 
     const explicacao = tipo.requires_document
-      ? "Informe os códigos dos documentos deste pedido. Os arquivos correspondentes podem ser anexados logo abaixo."
-      : "Se você tiver os códigos, informe aqui. Se não tiver, pode deixar em branco — descreva o pedido e nós identificamos.";
+      ? "Cole um ou mais códigos, um por linha."
+      : "Se não souber o código, siga sem preencher.";
 
     bloco.append(elemento("div", { class: "flow-card-head" }, [
       elemento("h3", {}, [
@@ -253,7 +252,7 @@
     return elemento("section", { class: "flow-card" }, [
       elemento("div", { class: "flow-card-head" }, [
         elemento("h3", { text: "Anexos" }),
-        elemento("p", { text: "Opcional. Os arquivos ficam privados e disponíveis para download somente por quem tem acesso à solicitação." }),
+        elemento("p", { text: "PDF, Excel ou Word." }),
       ]),
       area,
       estado.anexos.length ? lista : null,
@@ -331,8 +330,7 @@
     // próprio nome toda vez.
     blocos.push(elemento("section", { class: "flow-card" }, [
       elemento("div", { class: "flow-card-head" }, [
-        elemento("h3", { text: "Quem está solicitando" }),
-        elemento("p", { text: "Confirme seus dados. Usamos para responder e para o Controle de Solicitações." }),
+        elemento("h3", { text: "Seus dados" }),
       ]),
       elemento("div", { class: "flow-grid" }, [
         campoTexto("sol-nome", "Nome", { valor: estado.formulario._nome ?? (perfil.full_name || ""), obrigatorio: true }),
@@ -362,7 +360,6 @@
       blocos.push(elemento("section", { class: "flow-card" }, [
         elemento("div", { class: "flow-card-head" }, [
           elemento("h3", { text: tipo.label }),
-          elemento("p", { text: "As informações que este pedido precisa." }),
         ]),
         grade,
       ]));
@@ -374,8 +371,7 @@
     // Observações. Sempre presente: é onde cabe o que o formulário não previu.
     blocos.push(elemento("section", { class: "flow-card" }, [
       elemento("div", { class: "flow-card-head" }, [
-        elemento("h3", { text: "Mais alguma coisa?" }),
-        elemento("p", { text: "Prioridade, prazo, contexto — o que ajudar quem vai executar." }),
+        elemento("h3", { text: "Observações" }),
       ]),
       campoTexto("sol-observacao", "Observações", {
         valor: estado.formulario._observacao || "", tipo: "textarea",
@@ -469,7 +465,6 @@
       elemento("section", { class: "flow-card" }, [
         elemento("div", { class: "flow-card-head" }, [
           elemento("h3", { text: "Confira antes de enviar" }),
-          elemento("p", { text: "Depois do envio você recebe um protocolo para acompanhar." }),
         ]),
         dados,
         estado.documentos.length ? elemento("h4", { style: "margin:1.2rem 0 .4rem;font-size:.9rem", text: `Itens (${estado.documentos.length})` }) : null,
@@ -689,7 +684,6 @@
       elemento("main", { class: "flow-main estreito" }, [
         elemento("div", { class: "flow-page-head" }, [
           elemento("h1", { text: "Nova solicitação" }),
-          elemento("p", { text: "Informe apenas o que você sabe. O GRCON Flow cuida da pesquisa nas bases." }),
         ]),
         elemento("div", { id: "sol-etapas" }),
         elemento("div", { id: "sol-conteudo" }),
