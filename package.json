@@ -1,14 +1,14 @@
 {
-  "name": "grcon",
-  "version": "1.0.0-solicitacoes-independente",
+  "name": "grcon-flow",
+  "version": "1.0.0",
   "private": true,
-  "description": "GRCON — Operação de Solicitações desacoplada do sistema principal.",
+  "description": "GRCON Flow — central de recebimento, triagem, execução e acompanhamento de solicitações documentais.",
   "type": "commonjs",
   "engines": { "node": ">=22" },
   "scripts": {
     "build": "node scripts/build-runtime-config.mjs",
     "dev": "node scripts/build-runtime-config.mjs && node scripts/serve.mjs",
-    "check:syntax": "node --check solicitacoes_app.js && node --check solicitacoes_storage.js && node --check requests_core.js && node --check requests_report.js && node --check core.js && node --check grcon_contracts.js && node --check standalone_runtime.js",
-    "verify": "npm run check:syntax && node tests.mjs"
+    "check:syntax": "node scripts/verificar-sintaxe.mjs",
+    "verify": "npm run build && npm run check:syntax && node tests.mjs"
   }
 }

@@ -1,0 +1,614 @@
+/**
+ * GRCON Flow — camada de dados.
+ *
+ * Tudo o que a interface sabe sobre o banco passa por aqui. As telas nunca
+ * montam consulta nem conhecem nome de tabela: assim, trocar uma regra de
+ * acesso ou renomear uma coluna é mudança de um arquivo só.
+ *
+ * O banco é o do GRCON Flow. Nenhum endereço, chave ou tabela do GRCON
+ * principal é usado ou aceito.
+ */
+(function (root) {
+  "use strict";
+
+  const config = root.FLOW_CONFIG || {};
+  if (!config.supabaseUrl || !config.supabaseKey) {
+    console.error("[GRCON Flow] flow_config.js não foi carregado. Rode `npm run build`.");
+  }
+
+  const client = root.supabase.createClient(config.supabaseUrl, config.supabaseKey, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+  });
+
+  const state = { session: null, profile: null };
+  const ouvintes = new Set();
+
+  function texto(valor) {
+    return valor === null || valor === undefined ? "" : String(valor).trim();
+  }
+
+  /**
+   * Erro do Supabase vira mensagem que uma pessoa entende. A mensagem original
+   * fica no console: a tela não deve despejar jargão de banco em quem só quis
+   * enviar um pedido.
+   */
+  function traduzErro(erro, contexto) {
+    if (!erro) return null;
+    console.error(`[GRCON Flow] ${contexto || "erro"}:`, erro);
+    const bruto = texto(erro.message || erro.error_description || erro);
+    if (/Invalid login credentials/i.test(bruto)) return "E-mail ou senha incorretos.";
+    if (/Email not confirmed/i.test(bruto)) return "Confirme seu e-mail antes de entrar.";
+    if (/User already registered/i.test(bruto)) return "Este e-mail já tem cadastro. Faça login.";
+    if (/Password should be at least/i.test(bruto)) return "A senha precisa ter pelo menos 6 caracteres.";
+    if (/row-level security|permission denied|Sem permissão/i.test(bruto)) {
+      return bruto.includes("Sem permissão") ? bruto : "Seu perfil não tem permissão para esta ação.";
+    }
+    if (/Failed to fetch|NetworkError/i.test(bruto)) return "Sem conexão com o servidor. Tente novamente.";
+    if (/exceeded the maximum allowed size/i.test(bruto)) return "O arquivo passou do tamanho permitido.";
+    return bruto || "Não foi possível concluir a operação.";
+  }
+
+  // Toda chamada devolve { data, error } com o erro já traduzido, para que a
+  // tela não precise repetir tratamento em cada ponto.
+  async function chamar(promessa, contexto) {
+    try {
+      const { data, error } = await promessa;
+      if (error) return { data: null, error: traduzErro(error, contexto) };
+      return { data, error: null };
+    } catch (erro) {
+      return { data: null, error: traduzErro(erro, contexto) };
+    }
+  }
+
+  function avisar() {
+    ouvintes.forEach((fn) => {
+      try { fn(state.session, state.profile); } catch (erro) { console.error(erro); }
+    });
+  }
+
+  async function carregarPerfil() {
+    if (!state.session) { state.profile = null; return null; }
+    const { data } = await chamar(
+      client.from("flow_profiles").select("*").eq("id", state.session.user.id).maybeSingle(),
+      "carregar perfil"
+    );
+    // O perfil nasce por gatilho no Auth. Se ainda não chegou (corrida na
+    // primeira entrada), o app segue com o mínimo em vez de travar a tela.
+    state.profile = data || {
+      id: state.session.user.id,
+      email: state.session.user.email || "",
+      full_name: "",
+      area: "",
+      role: "solicitante",
+      active: true,
+    };
+    return state.profile;
+  }
+
+  const auth = {
+    get session() { return state.session; },
+    get profile() { return state.profile; },
+    get user() { return state.session ? state.session.user : null; },
+    get role() { return state.profile ? state.profile.role : null; },
+
+    ehEquipe() { return ["operador", "administrador", "proprietario"].includes(auth.role); },
+    ehAdmin() { return ["administrador", "proprietario"].includes(auth.role); },
+    ehProprietario() { return auth.role === "proprietario"; },
+
+    aoMudar(fn) { ouvintes.add(fn); return () => ouvintes.delete(fn); },
+
+    async iniciar() {
+      const { data } = await client.auth.getSession();
+      state.session = data ? data.session : null;
+      await carregarPerfil();
+      client.auth.onAuthStateChange(async (_evento, sessao) => {
+        state.session = sessao;
+        await carregarPerfil();
+        avisar();
+      });
+      avisar();
+      return state.profile;
+    },
+
+    async entrar(email, senha) {
+      const { data, error } = await chamar(
+        client.auth.signInWithPassword({ email: texto(email), password: senha }), "entrar"
+      );
+      if (error) return { error };
+      state.session = data.session;
+      await carregarPerfil();
+      avisar();
+      return { error: null };
+    },
+
+    async cadastrar(email, senha, nome, area) {
+      const { error } = await chamar(
+        client.auth.signUp({
+          email: texto(email),
+          password: senha,
+          options: { data: { full_name: texto(nome), area: texto(area) } },
+        }),
+        "cadastrar"
+      );
+      return { error };
+    },
+
+    async recuperarSenha(email) {
+      const { error } = await chamar(
+        client.auth.resetPasswordForEmail(texto(email), { redirectTo: `${root.location.origin}/` }),
+        "recuperar senha"
+      );
+      return { error };
+    },
+
+    async definirSenha(nova) {
+      const { error } = await chamar(client.auth.updateUser({ password: nova }), "definir senha");
+      return { error };
+    },
+
+    async sair() {
+      await client.auth.signOut();
+      state.session = null;
+      state.profile = null;
+      avisar();
+    },
+
+    async atualizarPerfil(campos) {
+      if (!state.session) return { error: "Sessão expirada." };
+      const { error } = await chamar(
+        client.from("flow_profiles")
+          .update({
+            full_name: texto(campos.full_name),
+            area: texto(campos.area),
+            contact: texto(campos.contact),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", state.session.user.id),
+        "atualizar perfil"
+      );
+      if (!error) await carregarPerfil();
+      return { error };
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Tipos de solicitação e seus campos
+  // ---------------------------------------------------------------------------
+  const tipos = {
+    async listar({ incluirInativos = false } = {}) {
+      let consulta = client.from("flow_request_types")
+        .select("*, campos:flow_type_fields(*)")
+        .order("display_order", { ascending: true });
+      if (!incluirInativos) consulta = consulta.eq("active", true);
+      const { data, error } = await chamar(consulta, "listar tipos");
+      if (error) return { data: [], error };
+      const lista = (data || []).map((tipo) => ({
+        ...tipo,
+        campos: (tipo.campos || []).slice().sort((a, b) => a.display_order - b.display_order),
+      }));
+      return { data: lista, error: null };
+    },
+
+    async salvar(tipo) {
+      const registro = {
+        code: texto(tipo.code).toUpperCase().replace(/[^A-Z0-9_]/g, "_"),
+        label: texto(tipo.label),
+        description: texto(tipo.description),
+        active: tipo.active !== false,
+        display_order: Number(tipo.display_order) || 0,
+        uses_ld: Boolean(tipo.uses_ld),
+        requires_document: Boolean(tipo.requires_document),
+        allows_documents: Boolean(tipo.allows_documents),
+        allows_multiple: Boolean(tipo.allows_multiple),
+        title_search: Boolean(tipo.title_search),
+        not_found_is_expected: Boolean(tipo.not_found_is_expected),
+        answer_required: Boolean(tipo.answer_required),
+        default_deadline_days: Number(tipo.default_deadline_days) || 5,
+        default_priority: tipo.default_priority || "normal",
+        updated_at: new Date().toISOString(),
+      };
+      if (!registro.code || !registro.label) return { error: "Informe código e rótulo do tipo." };
+      const consulta = tipo.id
+        ? client.from("flow_request_types").update(registro).eq("id", tipo.id)
+        : client.from("flow_request_types").insert(registro);
+      const { error } = await chamar(consulta, "salvar tipo");
+      return { error };
+    },
+
+    async salvarCampo(campo) {
+      const registro = {
+        type_id: campo.type_id,
+        field_key: texto(campo.field_key).toLowerCase().replace(/[^a-z0-9_]/g, "_"),
+        label: texto(campo.label),
+        help: texto(campo.help),
+        placeholder: texto(campo.placeholder),
+        field_kind: campo.field_kind || "text",
+        options: Array.isArray(campo.options) ? campo.options : [],
+        required: Boolean(campo.required),
+        display_order: Number(campo.display_order) || 0,
+      };
+      if (!registro.field_key || !registro.label) return { error: "Informe a chave e o rótulo do campo." };
+      const consulta = campo.id
+        ? client.from("flow_type_fields").update(registro).eq("id", campo.id)
+        : client.from("flow_type_fields").insert(registro);
+      const { error } = await chamar(consulta, "salvar campo");
+      return { error };
+    },
+
+    async removerCampo(id) {
+      return chamar(client.from("flow_type_fields").delete().eq("id", id), "remover campo");
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Solicitações
+  // ---------------------------------------------------------------------------
+  const solicitacoes = {
+    /**
+     * Registra a solicitação. O protocolo é gerado pelo banco, numa operação
+     * atômica: dois envios simultâneos nunca recebem o mesmo número.
+     */
+    async criar(dados) {
+      return chamar(
+        client.rpc("flow_create_request", {
+          p_type_code: dados.tipo,
+          p_requester_name: texto(dados.nome),
+          p_requester_area: texto(dados.area),
+          p_requester_contact: texto(dados.contato),
+          p_summary: texto(dados.resumo),
+          p_description: texto(dados.descricao),
+          p_form_data: dados.formulario || {},
+          p_items: dados.itens || [],
+        }),
+        "registrar solicitação"
+      );
+    },
+
+    async listar(filtros = {}) {
+      let consulta = client.from("flow_requests").select("*").order("created_at", { ascending: false });
+      if (filtros.status) consulta = consulta.eq("status", filtros.status);
+      if (filtros.tipo) consulta = consulta.eq("type_code", filtros.tipo);
+      if (filtros.responsavel) consulta = consulta.eq("owner_name", filtros.responsavel);
+      if (filtros.meus && state.session) consulta = consulta.eq("requester_id", state.session.user.id);
+      if (filtros.de) consulta = consulta.gte("created_at", filtros.de);
+      if (filtros.ate) consulta = consulta.lte("created_at", `${filtros.ate}T23:59:59`);
+      if (filtros.abertas) consulta = consulta.not("status", "in", "(concluido,cancelado)");
+      if (filtros.busca) {
+        const termo = texto(filtros.busca).replace(/[%,()]/g, " ");
+        consulta = consulta.or(
+          `protocol.ilike.%${termo}%,requester_name.ilike.%${termo}%,summary.ilike.%${termo}%,type_label.ilike.%${termo}%`
+        );
+      }
+      consulta = consulta.range(filtros.inicio || 0, (filtros.inicio || 0) + (filtros.limite || 100) - 1);
+      return chamar(consulta, "listar solicitações");
+    },
+
+    async obter(id) {
+      return chamar(
+        client.from("flow_requests")
+          .select("*, itens:flow_request_items(*), anexos:flow_attachments(*)")
+          .eq("id", id)
+          .maybeSingle(),
+        "abrir solicitação"
+      );
+    },
+
+    async porProtocolo(protocolo) {
+      return chamar(
+        client.rpc("flow_track_protocol", { p_protocol: texto(protocolo).toUpperCase() }),
+        "consultar protocolo"
+      );
+    },
+
+    async atualizar(id, campo, valor, nota) {
+      return chamar(
+        client.rpc("flow_update_request", {
+          p_request_id: id, p_field: campo, p_value: texto(valor), p_note: texto(nota),
+        }),
+        "atualizar solicitação"
+      );
+    },
+
+    /** Indicadores do painel. Contagem no servidor, sem trazer as linhas. */
+    async indicadores() {
+      const hoje = new Date().toISOString().slice(0, 10);
+      const contar = async (montar) => {
+        const { count } = await montar(
+          client.from("flow_requests").select("id", { count: "exact", head: true })
+        );
+        return count || 0;
+      };
+      const contarItens = async (montar) => {
+        const { count } = await montar(
+          client.from("flow_request_items").select("id", { count: "exact", head: true })
+        );
+        return count || 0;
+      };
+      const abertas = (q) => q.not("status", "in", "(concluido,cancelado)");
+      const [
+        emAberto, hojeRecebidas, execucao, validacao, atrasadas, concluidas, semResponsavel,
+        naoLocalizados, pendenteId, semAlocacao,
+      ] = await Promise.all([
+        contar(abertas),
+        contar((q) => q.gte("created_at", `${hoje}T00:00:00`)),
+        contar((q) => q.eq("status", "em_execucao")),
+        contar((q) => q.eq("status", "aguardando_validacao")),
+        contar((q) => abertas(q).lt("due_at", hoje)),
+        contar((q) => q.eq("status", "concluido")),
+        contar((q) => abertas(q).eq("owner_name", "")),
+        contarItens((q) => q.eq("classification", "NAO_LOCALIZADO")),
+        contarItens((q) => q.eq("classification", "IDENTIFICACAO_PENDENTE")),
+        contarItens((q) => q.eq("classification", "ACAO_NECESSARIA")),
+      ]);
+      return {
+        emAberto, hojeRecebidas, execucao, validacao, atrasadas, concluidas,
+        semResponsavel, naoLocalizados, pendenteId, semAlocacao,
+      };
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Itens e triagem
+  // ---------------------------------------------------------------------------
+  const itens = {
+    async listar(filtros = {}) {
+      let consulta = client.from("flow_request_items")
+        .select("*, solicitacao:flow_requests!inner(protocol,type_code,type_label,requester_name,requester_area,status,priority,due_at,created_at,owner_name)")
+        .order("created_at", { ascending: false });
+      if (filtros.classificacao) consulta = consulta.eq("classification", filtros.classificacao);
+      if (filtros.status) consulta = consulta.eq("status", filtros.status);
+      if (filtros.tipo) consulta = consulta.eq("solicitacao.type_code", filtros.tipo);
+      if (filtros.validar) consulta = consulta.eq("needs_validation", true);
+      consulta = consulta.range(filtros.inicio || 0, (filtros.inicio || 0) + (filtros.limite || 200) - 1);
+      return chamar(consulta, "listar itens");
+    },
+
+    async atualizar(ids, campo, valor, nota) {
+      return chamar(
+        client.rpc("flow_update_items", {
+          p_item_ids: ids, p_field: campo, p_value: texto(valor), p_note: texto(nota),
+        }),
+        "atualizar itens"
+      );
+    },
+
+    async historicoTriagem(itemId) {
+      return chamar(
+        client.from("flow_triage_runs").select("*").eq("item_id", itemId)
+          .order("run_number", { ascending: false }),
+        "histórico de triagem"
+      );
+    },
+  };
+
+  const triagem = {
+    /** Tria a solicitação inteira. Chamada logo após o envio. */
+    async solicitacao(id) {
+      return chamar(client.rpc("flow_triage_request", { target_request: id }), "executar triagem");
+    },
+    async item(id) {
+      return chamar(client.rpc("flow_triage_item", { target_item: id }), "triar item");
+    },
+    async buscarPorTitulo(titulo, limite) {
+      return chamar(
+        client.rpc("flow_search_by_title", { p_query: texto(titulo), p_limit: limite || 12 }),
+        "buscar por título"
+      );
+    },
+    async consultarDocumento(chaves) {
+      return chamar(client.rpc("flow_lookup_document", { p_keys: chaves }), "consultar documento");
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Base Documental (LDs)
+  // ---------------------------------------------------------------------------
+  const lds = {
+    async listar() {
+      return chamar(
+        client.from("flow_lds")
+          .select("*, versoes:flow_ld_versions(id,revision_label,file_name,document_count,status,created_at,activated_at,uploaded_by_name,error_message)")
+          .order("display_order", { ascending: true }),
+        "listar LDs"
+      );
+    },
+
+    async salvar(ld) {
+      const registro = {
+        code: texto(ld.code).toUpperCase().replace(/\s+/g, "_"),
+        name: texto(ld.name),
+        description: texto(ld.description),
+        active: ld.active !== false,
+        display_order: Number(ld.display_order) || 0,
+        updated_at: new Date().toISOString(),
+      };
+      if (!registro.code) return { error: "Informe o identificador da LD (ex.: LD_004)." };
+      const consulta = ld.id
+        ? client.from("flow_lds").update(registro).eq("id", ld.id)
+        : client.from("flow_lds").insert(registro);
+      return chamar(consulta, "salvar LD");
+    },
+
+    async criarVersao(ldId, arquivo, revisao) {
+      const perfil = state.profile || {};
+      return chamar(
+        client.from("flow_ld_versions").insert({
+          ld_id: ldId,
+          revision_label: texto(revisao),
+          file_name: texto(arquivo && arquivo.name),
+          status: "processando",
+          uploaded_by: state.session ? state.session.user.id : null,
+          uploaded_by_name: texto(perfil.full_name || perfil.email),
+        }).select().single(),
+        "criar versão da LD"
+      );
+    },
+
+    /** Um lote por chamada: a planilha inteira numa requisição só estouraria. */
+    async enviarLote(versaoId, documentos) {
+      return chamar(
+        client.rpc("flow_ingest_ld_documents", { target_version: versaoId, docs: documentos }),
+        "indexar documentos"
+      );
+    },
+
+    async ativarVersao(versaoId) {
+      return chamar(client.rpc("flow_activate_ld_version", { target_version: versaoId }), "ativar versão");
+    },
+
+    async marcarErro(versaoId, mensagem) {
+      return chamar(
+        client.from("flow_ld_versions")
+          .update({ status: "erro", error_message: texto(mensagem).slice(0, 500) })
+          .eq("id", versaoId),
+        "registrar falha da versão"
+      );
+    },
+
+    async removerVersao(versaoId) {
+      return chamar(client.rpc("flow_delete_ld_version", { target_version: versaoId }), "remover versão");
+    },
+
+    async guardarArquivo(versaoId, arquivo) {
+      const caminho = `${versaoId}/${arquivo.name}`;
+      const { error } = await chamar(
+        client.storage.from("flow-lds").upload(caminho, arquivo, { upsert: true }),
+        "guardar arquivo da LD"
+      );
+      if (error) return { error };
+      await client.from("flow_ld_versions").update({ storage_path: caminho }).eq("id", versaoId);
+      return { error: null };
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Comentários, anexos, histórico, notificações e usuários
+  // ---------------------------------------------------------------------------
+  const comentarios = {
+    async listar(requestId) {
+      return chamar(
+        client.from("flow_comments").select("*").eq("request_id", requestId)
+          .order("created_at", { ascending: true }),
+        "listar comentários"
+      );
+    },
+    async criar(requestId, corpo, interno = true, itemId = null) {
+      const perfil = state.profile || {};
+      return chamar(
+        client.from("flow_comments").insert({
+          request_id: requestId,
+          item_id: itemId,
+          body: texto(corpo),
+          internal: interno,
+          author_id: state.session ? state.session.user.id : null,
+          author_name: texto(perfil.full_name || perfil.email),
+        }),
+        "comentar"
+      );
+    },
+  };
+
+  const anexos = {
+    async enviar(requestId, arquivo, itemId = null) {
+      const limite = (config.uploadMaxMb || 25) * 1024 * 1024;
+      if (arquivo.size > limite) {
+        return { error: `“${arquivo.name}” tem mais de ${config.uploadMaxMb || 25} MB.` };
+      }
+      const nomeSeguro = arquivo.name.replace(/[^\w.\- ]+/g, "_");
+      const caminho = `${requestId}/${Date.now()}-${nomeSeguro}`;
+      const { error } = await chamar(
+        client.storage.from("flow-anexos").upload(caminho, arquivo),
+        "enviar anexo"
+      );
+      if (error) return { error };
+      return chamar(
+        client.from("flow_attachments").insert({
+          request_id: requestId,
+          item_id: itemId,
+          file_name: arquivo.name,
+          storage_path: caminho,
+          mime_type: arquivo.type || "",
+          size_bytes: arquivo.size,
+          uploaded_by: state.session ? state.session.user.id : null,
+        }),
+        "registrar anexo"
+      );
+    },
+    async link(caminho) {
+      const { data } = await client.storage.from("flow-anexos").createSignedUrl(caminho, 300);
+      return data ? data.signedUrl : null;
+    },
+  };
+
+  const historico = {
+    async listar(requestId) {
+      return chamar(
+        client.from("flow_history").select("*").eq("request_id", requestId)
+          .order("created_at", { ascending: false }),
+        "listar histórico"
+      );
+    },
+  };
+
+  const notificacoes = {
+    async listar() {
+      return chamar(
+        client.from("flow_notifications").select("*").is("read_at", null)
+          .order("created_at", { ascending: false }).limit(20),
+        "listar notificações"
+      );
+    },
+    async marcarLida(id) {
+      return chamar(
+        client.from("flow_notifications").update({ read_at: new Date().toISOString() }).eq("id", id),
+        "marcar notificação"
+      );
+    },
+  };
+
+  const usuarios = {
+    async listar() {
+      return chamar(
+        client.from("flow_profiles").select("*").order("full_name", { ascending: true }),
+        "listar usuários"
+      );
+    },
+    async definirPapel(userId, papel) {
+      return chamar(
+        client.rpc("flow_set_user_role", { target_user: userId, new_role: papel }),
+        "definir papel"
+      );
+    },
+    async ativar(userId, ativo) {
+      return chamar(
+        client.from("flow_profiles").update({ active: ativo }).eq("id", userId),
+        "ativar usuário"
+      );
+    },
+  };
+
+  const exportacao = {
+    /** Linhas cruas da exportação. A montagem das colunas fica em flow_export.js. */
+    async linhas(filtros = {}) {
+      let consulta = client.from("flow_export_view").select("*").order("protocol", { ascending: true });
+      if (filtros.tipo) consulta = consulta.eq("type_code", filtros.tipo);
+      if (filtros.status) consulta = consulta.eq("request_status", filtros.status);
+      if (filtros.responsavel) consulta = consulta.eq("owner_name", filtros.responsavel);
+      if (filtros.solicitante) consulta = consulta.eq("requester_name", filtros.solicitante);
+      if (filtros.classificacao) consulta = consulta.eq("classification", filtros.classificacao);
+      if (filtros.de) consulta = consulta.gte("received_at", filtros.de);
+      if (filtros.ate) consulta = consulta.lte("received_at", `${filtros.ate}T23:59:59`);
+      if (filtros.abertas) consulta = consulta.not("request_status", "in", "(concluido,cancelado)");
+      if (filtros.concluidas) consulta = consulta.eq("request_status", "concluido");
+      if (Array.isArray(filtros.protocolos) && filtros.protocolos.length) {
+        consulta = consulta.in("protocol", filtros.protocolos);
+      }
+      return chamar(consulta.limit(20000), "carregar linhas da exportação");
+    },
+  };
+
+  root.FlowApi = Object.freeze({
+    client, config, auth, tipos, solicitacoes, itens, triagem, lds,
+    comentarios, anexos, historico, notificacoes, usuarios, exportacao,
+  });
+})(window);

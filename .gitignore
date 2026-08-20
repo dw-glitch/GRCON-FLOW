@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+*.log
+
+# Gerado por `npm run build` a partir das variáveis de ambiente.
+# Fica fora do versionamento para que cada ambiente aponte para o seu projeto
+# Supabase sem conflito de merge. A Vercel roda o build no deploy.
+flow_config.js
