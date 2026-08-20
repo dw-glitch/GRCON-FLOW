@@ -100,8 +100,7 @@
 
     const busca = elemento("form", { class: "flow-card" }, [
       elemento("div", { class: "flow-card-head" }, [
-        elemento("h3", { text: "Consultar por protocolo" }),
-        elemento("p", { text: "Cole o número que você recebeu ao enviar a solicitação." }),
+        elemento("h3", { text: "Buscar protocolo" }),
       ]),
       elemento("div", { class: "flow-filtros", style: "margin:0" }, [
         elemento("label", { class: "flow-campo busca", for: "acomp-protocolo" }, [
@@ -121,8 +120,7 @@
       root.FlowUi.montarTopo({ ativo: "acompanhar", subtitulo: "Acompanhamento" }),
       elemento("main", { class: "flow-main estreito" }, [
         elemento("div", { class: "flow-page-head" }, [
-          elemento("h1", { text: "Acompanhar solicitações" }),
-          elemento("p", { text: "Todas as suas solicitações e o ponto em que cada uma está." }),
+          elemento("h1", { text: "Acompanhar" }),
         ]),
         busca,
         resultado,

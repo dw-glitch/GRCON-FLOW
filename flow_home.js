@@ -34,9 +34,9 @@
 
     const titulo = { entrar: "Entrar no GRCON Flow", cadastrar: "Criar sua conta", recuperar: "Recuperar senha" }[modo];
     const legenda = {
-      entrar: "Use seu e-mail corporativo para acessar as solicitações.",
-      cadastrar: "Leva um minuto. Depois você já pode registrar sua primeira solicitação.",
-      recuperar: "Enviaremos um link de redefinição para o seu e-mail.",
+      entrar: "Acesse com seu e-mail corporativo.",
+      cadastrar: "Use seu e-mail @agnet.com.br.",
+      recuperar: "Receba o link no seu e-mail.",
     }[modo];
 
     cartao.append(
@@ -46,7 +46,7 @@
       erro
     );
 
-    const email = campo("login-email", "E-mail", "email", { autocomplete: "email", placeholder: "nome@empresa.com" });
+    const email = campo("login-email", "E-mail", "email", { autocomplete: "email", placeholder: "nome@agnet.com.br" });
     cartao.append(email);
 
     let nome, area, senha;

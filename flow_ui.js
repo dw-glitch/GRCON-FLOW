@@ -43,6 +43,19 @@
     return node;
   }
 
+  const ICONES_NAVEGACAO = Object.freeze({
+    painel: "M4 13h6V4H4v9Zm10 7h6v-9h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z",
+    solicitar: "M12 5v14M5 12h14",
+    acompanhar: "M4 12a8 8 0 1 0 3-6.25M4 4v5h5M12 8v5l3 2",
+  });
+
+  function iconeNavegacao(chave) {
+    return elemento("svg", {
+      class: "flow-nav-icon", viewBox: "0 0 24 24", "aria-hidden": "true",
+      html: `<path d="${ICONES_NAVEGACAO[chave] || ICONES_NAVEGACAO.painel}"></path>`,
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Vocabulário da operação
   // ---------------------------------------------------------------------------
@@ -195,18 +208,15 @@
     const nav = elemento("nav", { "aria-label": "Áreas do GRCON Flow" },
       links.map((link) => elemento("a", {
         href: link.href,
-        text: link.rotulo,
         "aria-current": link.chave === ativo ? "page" : null,
-      }))
+      }, [iconeNavegacao(link.chave), elemento("span", { text: link.rotulo })]))
     );
 
     return elemento("header", { class: "flow-topbar" }, [
       elemento("a", { class: "flow-brand", href: "/", "aria-label": "GRCON Flow — início" }, [
         elemento("img", { src: "grcon-logo-app.png", alt: "GRCON" }),
-        elemento("span", {}, [
-          elemento("strong", { text: "GRCON Flow" }),
-          elemento("span", { text: subtitulo || "Central de solicitações documentais" }),
-        ]),
+        elemento("strong", { class: "flow-product", text: "FLOW" }),
+        subtitulo ? elemento("span", { class: "sr-only", text: subtitulo }) : null,
       ]),
       elemento("span", { class: "flow-topbar-spacer" }),
       nav,
@@ -226,8 +236,8 @@
 
   function montarRodape() {
     return elemento("footer", { class: "flow-footer" }, [
-      elemento("span", { text: "GRCON Flow · central de solicitações documentais" }),
-      elemento("span", { text: "Processamento no servidor · acesso por perfil · histórico completo" }),
+      elemento("span", { text: "GRCON Flow" }),
+      elemento("span", { text: `© ${new Date().getFullYear()} CONSAG Engenharia` }),
     ]);
   }
 

@@ -16,6 +16,10 @@
   const { elemento, avisar, texto, seloClassificacao, seloStatus, seloPrazo, data: fmtData, dataHora } = Ui;
   const Api = root.FlowApi;
   const app = document.getElementById("app");
+  const COLUNAS_LISTA = (root.FlowExport && root.FlowExport.COLUNAS_PAINEL
+    ? root.FlowExport.COLUNAS_PAINEL.map((coluna) =>
+      coluna.header.charAt(0) + coluna.header.slice(1).toLocaleLowerCase("pt-BR"))
+    : ["Protocolo", "Tipo", "Solicitante", "Recebida", "Responsável", "Progresso", "Status", "Prazo"]);
 
   const estado = {
     aba: "solicitacoes",
@@ -179,8 +183,7 @@
           },
         }),
       ]),
-      ...["Protocolo", "Tipo", "Solicitante", "Recebida", "Responsável", "Progresso", "Status", "Prazo"]
-        .map((rotulo) => elemento("th", { text: rotulo })),
+      ...COLUNAS_LISTA.map((rotulo) => elemento("th", { text: rotulo })),
     ]);
 
     const corpo = elemento("tbody");
@@ -780,7 +783,7 @@
   async function exportar(escopo) {
     avisar("Montando a planilha…");
     const filtros = {};
-    let descricao = "todos os registros";
+    let descricao = "registros visíveis no painel";
 
     if (escopo === "selecionadas") {
       const protocolos = estado.solicitacoes
@@ -789,10 +792,11 @@
       filtros.protocolos = protocolos;
       descricao = `${protocolos.length} solicitação(ões) selecionada(s)`;
     } else if (escopo === "filtro") {
-      if (estado.filtros.tipo) { filtros.tipo = estado.filtros.tipo; descricao = `tipo ${estado.filtros.tipo}`; }
-      if (estado.filtros.status) { filtros.status = estado.filtros.status; descricao = `status ${estado.filtros.status}`; }
-      if (estado.filtros.classificacao) { filtros.classificacao = estado.filtros.classificacao; descricao = `classificação ${estado.filtros.classificacao}`; }
-      if (estado.filtros.abertas) { filtros.abertas = true; descricao = "solicitações em aberto"; }
+      // Inclui busca, indicadores e recortes feitos no navegador: o arquivo
+      // recebe exatamente os protocolos que a pessoa está vendo na tabela.
+      filtros.protocolos = estado.solicitacoes.map((s) => s.protocol);
+      if (!filtros.protocolos.length) { avisar("Não há solicitações visíveis para exportar.", "erro"); return; }
+      descricao = `${filtros.protocolos.length} solicitação(ões) visível(is) no painel`;
     }
 
     const { data, error } = await Api.exportacao.linhas(filtros);
@@ -853,8 +857,8 @@
         },
       }),
       elemento("span", { style: "flex:1" }),
-      elemento("button", { class: "secondary-button compact", type: "button", text: "Exportar Excel", onclick: () => exportar("filtro") }),
-      elemento("button", { class: "text-button", type: "button", text: "Exportar selecionadas", onclick: () => exportar("selecionadas") }),
+      elemento("button", { class: "secondary-button compact", type: "button", text: "Exportar painel", onclick: () => exportar("filtro") }),
+      elemento("button", { class: "text-button", type: "button", text: "Só selecionadas", onclick: () => exportar("selecionadas") }),
     ]);
   }
 
@@ -978,8 +982,7 @@
       Ui.montarTopo({ ativo: "painel", subtitulo: "Painel operacional" }),
       elemento("main", { class: "flow-main largo" }, [
         elemento("div", { class: "flow-page-head" }, [
-          elemento("h1", { text: "Painel operacional" }),
-          elemento("p", { text: "O que chegou, o que está em execução, o que precisa de validação e o que já pode ser concluído." }),
+          elemento("h1", { text: "Solicitações" }),
         ]),
         abas,
         elemento("div", { id: "painel-conteudo" }),

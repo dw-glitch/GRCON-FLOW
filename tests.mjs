@@ -186,6 +186,54 @@ check("a exportação reproduz as 26 colunas do Controle de Solicitações", () 
   assert.equal(cabecalhos[25], "Data de inclusão do status");
 });
 
+check("a primeira aba do Excel tem as mesmas colunas visíveis no painel", () => {
+  const headers = Export.COLUNAS_PAINEL.map((coluna) => coluna.header);
+  assert.deepEqual(headers, [
+    "PROTOCOLO", "TIPO", "SOLICITANTE", "RECEBIDA",
+    "RESPONSÁVEL", "PROGRESSO", "STATUS", "PRAZO",
+  ]);
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /FlowExport\.COLUNAS_PAINEL/,
+    "a tela deve ler os cabeçalhos da mesma fonte usada pela planilha");
+});
+
+check("itens repetidos viram uma única linha de solicitação com progresso correto", () => {
+  const linhas = Export.consolidarPainel([
+    {
+      protocol: "FLOW-2026-000200", type_label: "Postagem no SIGEM",
+      requester_name: "Ana", requester_area: "Engenharia", received_at: "2026-08-20T10:00:00Z",
+      owner_name: "Luiz", request_status: "em_execucao", request_due_at: "2026-08-30",
+      item_status: "concluido",
+    },
+    {
+      protocol: "FLOW-2026-000200", type_label: "Postagem no SIGEM",
+      requester_name: "Ana", requester_area: "Engenharia", received_at: "2026-08-20T10:00:00Z",
+      owner_name: "Luiz", request_status: "em_execucao", request_due_at: "2026-08-30",
+      item_status: "em_execucao",
+    },
+  ]);
+  assert.equal(linhas.length, 1);
+  assert.equal(linhas[0].requester, "Ana\nEngenharia");
+  assert.equal(linhas[0].progress, "1/2");
+  assert.equal(linhas[0].status, "Em execução");
+  assert.match(linhas[0].due, /^30\/08\/2026/,
+    "data sem hora não pode voltar um dia por causa do fuso do computador");
+});
+
+check("a exportação filtrada usa exatamente os protocolos visíveis", () => {
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /filtros\.protocolos = estado\.solicitacoes\.map/);
+  assert.doesNotMatch(painel, /if \(estado\.filtros\.tipo\) \{ filtros\.tipo/,
+    "reconstruir apenas parte dos filtros faria o Excel divergir da tela");
+});
+
+check("a planilha usa a mesma logo oficial do aplicativo", () => {
+  const exportacao = fs.readFileSync(path.join(root, "flow_export.js"), "utf8");
+  assert.match(exportacao, /attachBrandLogo\([^\n]+grcon-logo-report\.png/);
+  assert.ok(fs.existsSync(path.join(root, "grcon-logo-app.png")));
+  assert.ok(fs.existsSync(path.join(root, "grcon-logo-report.png")));
+});
+
 check("uma linha da view vira uma linha do Controle sem inventar campo", () => {
   const linha = Export.linhaDoControle({
     protocol: "FLOW-2026-000158",
