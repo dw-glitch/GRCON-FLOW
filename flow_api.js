@@ -326,6 +326,37 @@
       );
     },
 
+    /**
+     * Exclusão administrativa e permanente. Os objetos privados saem pelo
+     * Storage API antes da linha principal, evitando arquivos órfãos no bucket.
+     * O RPC repete a autorização no banco; esconder o botão não é a proteção.
+     */
+    async excluir(id, anexos = []) {
+      if (!auth.ehAdmin()) return { data: null, error: "Seu perfil não tem permissão para excluir solicitações." };
+      const caminhos = [...new Set((anexos || []).map((anexo) => texto(anexo.storage_path)).filter(Boolean))];
+      if (caminhos.length) {
+        const remocao = await chamar(
+          client.storage.from("flow-anexos").remove(caminhos),
+          "remover anexos da solicitação"
+        );
+        if (remocao.error) return remocao;
+      }
+
+      const exclusao = await chamar(
+        client.rpc("flow_delete_request", { p_request_id: id }),
+        "excluir solicitação"
+      );
+      if (exclusao.error) {
+        const prefixo = caminhos.length ? "Os anexos foram removidos, mas " : "";
+        return { data: null, error: `${prefixo}${exclusao.error}` };
+      }
+      const resultado = Array.isArray(exclusao.data) ? exclusao.data[0] : exclusao.data;
+      if (!resultado || !resultado.deleted) {
+        return { data: null, error: "Solicitação não encontrada ou já excluída." };
+      }
+      return { data: resultado, error: null };
+    },
+
     /** Indicadores do painel. Contagem no servidor, sem trazer as linhas. */
     async indicadores() {
       const hoje = new Date().toISOString().slice(0, 10);

@@ -76,6 +76,11 @@ arquivo. O solicitante vê o resultado de cada envio e pode tentar novamente se
 algum falhar. A equipe baixa o arquivo original na ficha da solicitação por um
 link temporário; o bucket não é público.
 
+**Exclusão é administrativa e permanente.** Administrador e proprietário podem
+excluir uma solicitação pela ficha do painel. O aplicativo exige digitar o
+protocolo e confirmar a ação; remove primeiro os anexos pelo Storage API e só
+então apaga a solicitação, seus itens, triagens, histórico e comentários.
+
 ### Classificações
 
 | Classificação | Quando |
