@@ -482,6 +482,12 @@ check("o painel exige o protocolo e confirmação antes da exclusão permanente"
   assert.match(painel, /Api\.solicitacoes\.excluir\(solicitacao\.id, solicitacao\.anexos \|\| \[\]\)/);
 });
 
+check("a listagem de LDs informa a relação histórica sem ambiguidade", () => {
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /versoes:flow_ld_versions!flow_ld_versions_ld_id_fkey\(/,
+    "sem a FK explícita o PostgREST responde 300 porque current_version_id cria uma segunda relação");
+});
+
 check("a configuração publicada não carrega chave secreta", () => {
   const config = fs.readFileSync(path.join(root, "flow_config.js"), "utf8");
   assert.doesNotMatch(config, /sb_secret_/, "chave secreta jamais vai para o navegador");
