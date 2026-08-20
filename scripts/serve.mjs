@@ -3,18 +3,47 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Servidor de desenvolvimento. Reproduz o `cleanUrls` da Vercel — /solicitar
+// serve solicitar.html — para que o que se testa aqui seja o que roda lá.
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.PORT || 4173);
-const types = { ".html":"text/html; charset=utf-8", ".js":"text/javascript; charset=utf-8", ".css":"text/css; charset=utf-8", ".png":"image/png", ".ico":"image/x-icon", ".md":"text/plain; charset=utf-8" };
+
+const tipos = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".json": "application/json; charset=utf-8",
+  ".md": "text/plain; charset=utf-8",
+};
+
+function resolver(caminho) {
+  const relativo = caminho === "/" ? "index.html" : caminho.replace(/^\/+/, "");
+  const candidatos = /\.[a-z0-9]+$/i.test(relativo)
+    ? [relativo]
+    : [`${relativo}.html`, path.join(relativo, "index.html"), relativo];
+
+  for (const candidato of candidatos) {
+    const alvo = path.resolve(root, candidato);
+    // Nada fora da pasta do projeto, mesmo com ../ no caminho.
+    if (alvo !== root && !alvo.startsWith(root + path.sep)) continue;
+    if (fs.existsSync(alvo) && fs.statSync(alvo).isFile()) return alvo;
+  }
+  return null;
+}
 
 http.createServer((req, res) => {
-  const raw = decodeURIComponent((req.url || "/").split("?")[0]);
-  const relative = raw === "/" ? "index.html" : raw.replace(/^\/+/, "");
-  const target = path.resolve(root, relative);
-  if (!target.startsWith(root + path.sep) && target !== path.join(root, "index.html")) { res.writeHead(403); return res.end("Forbidden"); }
-  fs.readFile(target, (error, data) => {
-    if (error) { res.writeHead(404); return res.end("Not found"); }
-    res.writeHead(200, { "Content-Type": types[path.extname(target).toLowerCase()] || "application/octet-stream", "Cache-Control": "no-store" });
-    res.end(data);
+  const bruto = decodeURIComponent((req.url || "/").split("?")[0]);
+  const alvo = resolver(bruto);
+  if (!alvo) { res.writeHead(404); return res.end("Not found"); }
+  fs.readFile(alvo, (erro, dados) => {
+    if (erro) { res.writeHead(404); return res.end("Not found"); }
+    res.writeHead(200, {
+      "Content-Type": tipos[path.extname(alvo).toLowerCase()] || "application/octet-stream",
+      "Cache-Control": "no-store",
+    });
+    res.end(dados);
   });
-}).listen(port, "0.0.0.0", () => console.log(`GRCON Solicitações: http://localhost:${port}`));
+}).listen(port, "0.0.0.0", () => console.log(`GRCON Flow: http://localhost:${port}`));

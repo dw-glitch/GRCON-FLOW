@@ -1,0 +1,348 @@
+/* GRCON Flow — camada visual própria.
+   Usa os tokens do design-system do GRCON, para que o Flow seja reconhecível
+   como parte da mesma família sem herdar a densidade do painel de engenharia:
+   quem vem só enviar um pedido merece uma tela mais leve. */
+
+@layer modules {
+
+  /* ── Estrutura ─────────────────────────────────────────────────────────── */
+  .flow-body { min-height: 100vh; display: flex; flex-direction: column; background: var(--surface-0); }
+
+  .flow-topbar {
+    position: sticky; top: 0; z-index: 30;
+    display: flex; align-items: center; gap: var(--space-4);
+    padding: .7rem clamp(1rem, 3vw, 2rem);
+    background: var(--surface-1); border-bottom: 1px solid var(--border-1);
+  }
+  .flow-brand { display: flex; align-items: center; gap: .7rem; min-width: 0; text-decoration: none; color: inherit; }
+  .flow-brand:hover strong { color: var(--brand-700); }
+  .flow-brand img { height: 34px; width: auto; }
+  .flow-brand strong { display: block; font-size: .98rem; color: var(--brand-strong); line-height: 1.15; }
+  .flow-brand span { display: block; font-size: .72rem; color: var(--text-3); }
+  .flow-topbar-spacer { flex: 1; }
+  .flow-topbar nav { display: flex; gap: .25rem; flex-wrap: wrap; }
+  .flow-topbar nav a {
+    padding: .45rem .8rem; border-radius: var(--radius-sm); text-decoration: none;
+    color: var(--text-2); font-size: .85rem; font-weight: 600;
+  }
+  .flow-topbar nav a:hover { background: var(--surface-3); color: var(--brand-800); }
+  .flow-topbar nav a[aria-current="page"] { background: var(--brand-100); color: var(--brand-800); }
+
+  .flow-user { display: flex; align-items: center; gap: .5rem; }
+  .flow-user-chip {
+    display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 999px;
+    background: var(--brand-700); color: #fff; font-size: .78rem; font-weight: 800;
+  }
+  .flow-user-info { display: none; line-height: 1.2; }
+  @media (min-width: 720px) { .flow-user-info { display: block; } }
+  .flow-user-info strong { display: block; font-size: .8rem; color: var(--text-1); }
+  .flow-user-info span { font-size: .68rem; color: var(--text-3); }
+
+  .flow-main { flex: 1; width: 100%; margin: 0 auto; padding: clamp(1rem, 3vw, 2rem); }
+  .flow-main.estreito { max-width: 60rem; }
+  .flow-main.largo { max-width: 96rem; }
+
+  .flow-footer {
+    padding: .8rem clamp(1rem, 3vw, 2rem); border-top: 1px solid var(--border-1);
+    color: var(--text-3); font-size: .72rem; display: flex; justify-content: space-between; gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  /* ── Cartões e cabeçalhos ──────────────────────────────────────────────── */
+  .flow-card {
+    background: var(--surface-1); border: 1px solid var(--border-1);
+    border-radius: var(--radius-md); padding: clamp(1rem, 2.4vw, 1.5rem);
+  }
+  .flow-card + .flow-card { margin-top: var(--space-5); }
+  .flow-card-head { margin-bottom: var(--space-4); }
+  .flow-card-head h2 { margin: 0 0 .2rem; font-size: 1.15rem; color: var(--brand-strong); }
+  .flow-card-head h3 { margin: 0 0 .2rem; font-size: 1rem; color: var(--brand-strong); }
+  .flow-card-head p { margin: 0; font-size: .82rem; color: var(--text-3); }
+
+  .flow-page-head { margin-bottom: var(--space-5); }
+  .flow-page-head h1 { margin: 0 0 .25rem; font-size: clamp(1.4rem, 3vw, 1.9rem); }
+  .flow-page-head p { margin: 0; color: var(--text-2); }
+
+  /* ── Formulário ────────────────────────────────────────────────────────── */
+  .flow-grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+  .flow-grid .larga { grid-column: 1 / -1; }
+
+  .flow-campo { display: grid; gap: .3rem; min-width: 0; }
+  .flow-campo > span { font-size: .8rem; font-weight: 650; color: var(--text-2); }
+  .flow-campo > small { font-size: .74rem; color: var(--text-3); }
+  .flow-campo .obrigatorio { color: #b4443a; margin-left: .15rem; }
+  .flow-campo input, .flow-campo select, .flow-campo textarea {
+    width: 100%; padding: .55rem .7rem; border: 1px solid var(--border-1);
+    border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-1);
+  }
+  .flow-campo textarea { resize: vertical; min-height: 5rem; }
+  .flow-campo input:focus-visible, .flow-campo select:focus-visible, .flow-campo textarea:focus-visible {
+    outline: none; border-color: var(--brand-600); box-shadow: var(--focus);
+  }
+  .flow-campo.invalido input, .flow-campo.invalido select, .flow-campo.invalido textarea {
+    border-color: #c2544a; background: #fff6f5;
+  }
+  .flow-erro-campo { font-size: .74rem; color: #a83f35; }
+
+  /* ── Escolha do tipo ───────────────────────────────────────────────────── */
+  .flow-tipos { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); }
+  .flow-tipo {
+    display: flex; gap: .7rem; align-items: flex-start; text-align: left;
+    padding: .9rem 1rem; border: 1px solid var(--border-1); border-radius: var(--radius-md);
+    background: var(--surface-1); cursor: pointer; min-height: 4.6rem;
+    transition: border-color .15s, box-shadow .15s, background .15s;
+  }
+  .flow-tipo:hover { border-color: var(--brand-600); background: var(--brand-50); }
+  .flow-tipo[aria-pressed="true"] {
+    border-color: var(--brand-600); background: var(--brand-100);
+    box-shadow: inset 3px 0 0 var(--brand-700);
+  }
+  .flow-tipo svg { flex: 0 0 22px; width: 22px; height: 22px; fill: none; stroke: var(--brand-700); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; margin-top: .1rem; }
+  .flow-tipo b { display: block; font-size: .88rem; color: var(--text-1); }
+  .flow-tipo small { display: block; font-size: .75rem; color: var(--text-3); margin-top: .15rem; }
+
+  /* ── Etapas ────────────────────────────────────────────────────────────── */
+  .flow-etapas { display: flex; gap: .5rem; list-style: none; margin: 0 0 var(--space-5); padding: 0; flex-wrap: wrap; }
+  .flow-etapa { display: flex; align-items: center; gap: .45rem; font-size: .8rem; color: var(--text-3); }
+  .flow-etapa b {
+    width: 1.5rem; height: 1.5rem; border-radius: 999px; display: grid; place-items: center;
+    background: var(--surface-3); color: var(--text-3); font-size: .75rem; font-weight: 800;
+  }
+  .flow-etapa.atual { color: var(--brand-800); font-weight: 650; }
+  .flow-etapa.atual b { background: var(--brand-700); color: #fff; }
+  .flow-etapa.feita b { background: var(--success-100); color: var(--success-700); }
+  .flow-etapa.feita b::after { content: "✓"; }
+  .flow-etapa.feita b { font-size: .85rem; }
+  .flow-etapa-sep { color: var(--border-2); align-self: center; }
+
+  /* ── Área de arrastar ──────────────────────────────────────────────────── */
+  .flow-drop {
+    display: grid; place-items: center; gap: .3rem; padding: 1.6rem 1rem; text-align: center;
+    border: 2px dashed var(--border-2); border-radius: var(--radius-md);
+    background: var(--surface-2); cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .flow-drop:hover, .flow-drop:focus-visible { border-color: var(--brand-600); background: var(--brand-50); }
+  .flow-drop.sobre { border-style: solid; border-color: var(--brand-600); background: var(--brand-100); }
+  .flow-drop svg { width: 26px; height: 26px; fill: none; stroke: var(--brand-700); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .flow-drop strong { font-size: .88rem; }
+  .flow-drop span { font-size: .76rem; color: var(--text-3); }
+
+  /* ── Lista de itens ────────────────────────────────────────────────────── */
+  .flow-itens { display: grid; gap: .4rem; margin-top: var(--space-4); }
+  .flow-item {
+    display: grid; grid-template-columns: auto 1fr auto; gap: .6rem; align-items: center;
+    padding: .5rem .7rem; border: 1px solid var(--border-1); border-radius: var(--radius-sm);
+    background: var(--surface-1); font-size: .82rem;
+  }
+  .flow-item-num { color: var(--text-3); font-variant-numeric: tabular-nums; font-size: .75rem; }
+  .flow-item-corpo { min-width: 0; }
+  .flow-item-corpo code { font-family: var(--font-mono); font-size: .78rem; color: var(--text-1); overflow-wrap: anywhere; }
+  .flow-item-corpo em { display: block; font-style: normal; font-size: .74rem; color: var(--text-3); overflow-wrap: anywhere; }
+  .flow-item-sem-codigo code { color: var(--text-3); font-style: italic; }
+
+  /* ── Tabela ────────────────────────────────────────────────────────────── */
+  .flow-tabela-wrap { overflow-x: auto; border: 1px solid var(--border-1); border-radius: var(--radius-md); background: var(--surface-1); }
+  .flow-tabela { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  .flow-tabela th, .flow-tabela td { padding: .5rem .6rem; text-align: left; border-bottom: 1px solid var(--border-1); vertical-align: top; }
+  .flow-tabela thead th {
+    position: sticky; top: 0; z-index: 1; background: var(--surface-3);
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); white-space: nowrap;
+  }
+  .flow-tabela tbody tr:hover { background: var(--surface-2); }
+  .flow-tabela tbody tr.selecionada { background: var(--brand-50); }
+  /* Código documental não quebra no meio: preferimos rolar a tabela a exibir
+     "MA-5290.00-" numa linha e o resto na seguinte. */
+  .flow-tabela code { font-family: var(--font-mono); font-size: .76rem; white-space: nowrap; }
+  .flow-tabela td { min-width: 5rem; }
+  /* Na ficha o espaço é estreito e as colunas variam por tipo; a tabela mantém
+     a largura natural e o contêiner rola. */
+  .flow-drawer-corpo .flow-tabela { min-width: 46rem; }
+  .flow-tabela .col-check { width: 2.2rem; }
+  .flow-tabela .protocolo { font-family: var(--font-mono); font-size: .76rem; color: var(--brand-800); font-weight: 700; white-space: nowrap; }
+  .flow-tabela button.protocolo { background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; }
+
+  /* ── Indicadores ───────────────────────────────────────────────────────── */
+  .flow-indicadores { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); margin-bottom: var(--space-5); }
+  .flow-indicador {
+    padding: .75rem .85rem; border: 1px solid var(--border-1); border-radius: var(--radius-md);
+    background: var(--surface-1); text-align: left; cursor: pointer; display: grid; gap: .15rem;
+    border-left: 3px solid var(--brand-600);
+  }
+  .flow-indicador:hover { border-color: var(--brand-600); box-shadow: var(--shadow-1); }
+  .flow-indicador[aria-pressed="true"] { background: var(--brand-100); }
+  .flow-indicador strong { font-size: 1.5rem; line-height: 1; color: var(--text-1); font-variant-numeric: tabular-nums; }
+  .flow-indicador span { font-size: .72rem; color: var(--text-3); }
+  .flow-indicador.alerta { border-left-color: #c2544a; }
+  .flow-indicador.atencao { border-left-color: #b58225; }
+  .flow-indicador.ok { border-left-color: var(--success-700); }
+
+  /* ── Selos de classificação e status ───────────────────────────────────── */
+  .flow-selo {
+    display: inline-block; padding: .12rem .5rem; border-radius: 999px;
+    font-size: .7rem; font-weight: 700; white-space: nowrap; letter-spacing: .01em;
+  }
+  .flow-selo.pronto { background: var(--success-100); color: var(--success-700); }
+  .flow-selo.validar { background: #fff3cf; color: #7a5300; }
+  .flow-selo.nao-localizado { background: #ffefec; color: #a83f35; }
+  .flow-selo.nao-localizado-esperado { background: var(--surface-3); color: var(--text-2); }
+  .flow-selo.acao { background: #ffe9d8; color: #94500f; }
+  .flow-selo.pendente { background: #eae6fb; color: #4c3f96; }
+  .flow-selo.candidatos { background: var(--brand-100); color: var(--brand-800); }
+  .flow-selo.neutro { background: var(--surface-3); color: var(--text-2); }
+  .flow-selo.atrasado { background: #ffefec; color: #a83f35; }
+  .flow-selo.vence-hoje { background: #fff3cf; color: #7a5300; }
+  .flow-selo.no-prazo { background: var(--success-100); color: var(--success-700); }
+
+  /* ── Barra de progresso ────────────────────────────────────────────────── */
+  .flow-progresso { display: grid; gap: .2rem; min-width: 7rem; }
+  .flow-progresso-barra { height: .4rem; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+  .flow-progresso-barra i { display: block; height: 100%; background: var(--brand-600); border-radius: 999px; }
+  .flow-progresso small { font-size: .68rem; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+  /* ── Filtros e ações ───────────────────────────────────────────────────── */
+  .flow-filtros { display: flex; gap: .6rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: var(--space-4); }
+  .flow-filtros .flow-campo { min-width: 9rem; }
+  .flow-filtros .busca { flex: 1 1 16rem; }
+  .flow-acoes { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+  .flow-acoes .separador { width: 1px; height: 1.6rem; background: var(--border-1); }
+
+  .flow-lote {
+    display: flex; gap: .6rem; align-items: flex-end; flex-wrap: wrap;
+    padding: .7rem .85rem; margin-bottom: .7rem;
+    border: 1px solid var(--brand-600); border-radius: var(--radius-sm); background: var(--brand-50);
+  }
+
+  /* ── Painel lateral (ficha) ────────────────────────────────────────────── */
+  .flow-drawer {
+    position: fixed; inset: 0; z-index: 60; display: none;
+    background: rgb(12 32 48 / 45%);
+  }
+  .flow-drawer[open], .flow-drawer.aberto { display: block; }
+  .flow-drawer-painel {
+    position: absolute; top: 0; right: 0; height: 100%; width: min(46rem, 100%);
+    background: var(--surface-0); box-shadow: var(--shadow-2);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .flow-drawer-head {
+    display: flex; align-items: flex-start; gap: 1rem; padding: 1rem 1.2rem;
+    border-bottom: 1px solid var(--border-1); background: var(--surface-1);
+  }
+  .flow-drawer-head h2 { margin: 0 0 .15rem; font-size: 1.05rem; }
+  .flow-drawer-head p { margin: 0; font-size: .78rem; color: var(--text-3); }
+  .flow-drawer-corpo { flex: 1; overflow-y: auto; padding: 1.2rem; display: grid; gap: var(--space-5); }
+
+  .flow-dados { display: grid; gap: .55rem; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+  .flow-dado { min-width: 0; }
+  .flow-dado dt { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); margin-bottom: .1rem; }
+  .flow-dado dd { margin: 0; font-size: .85rem; color: var(--text-1); overflow-wrap: anywhere; }
+
+  .flow-timeline { display: grid; gap: .55rem; }
+  .flow-evento { display: grid; grid-template-columns: 8.5rem 1fr; gap: .6rem; font-size: .8rem; align-items: baseline; }
+  .flow-evento time { color: var(--text-3); font-size: .72rem; font-variant-numeric: tabular-nums; }
+  .flow-evento b { font-weight: 650; }
+  .flow-evento span { color: var(--text-2); }
+
+  .flow-comentario { padding: .6rem .75rem; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border-1); }
+  .flow-comentario header { display: flex; justify-content: space-between; gap: .5rem; font-size: .72rem; color: var(--text-3); margin-bottom: .25rem; }
+  .flow-comentario p { margin: 0; font-size: .84rem; white-space: pre-wrap; }
+
+  /* ── Triagem: ocorrências e candidatos ─────────────────────────────────── */
+  .flow-triagem { padding: .7rem .85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-1); background: var(--surface-2); }
+  .flow-triagem p { margin: 0 0 .3rem; font-size: .84rem; }
+  .flow-triagem small { display: block; font-size: .74rem; color: var(--text-3); }
+  .flow-candidato {
+    display: flex; justify-content: space-between; gap: .7rem; align-items: center;
+    padding: .5rem .65rem; border: 1px solid var(--border-1); border-radius: var(--radius-sm);
+    background: var(--surface-1); font-size: .8rem; margin-top: .35rem;
+  }
+  .flow-candidato code { font-family: var(--font-mono); font-size: .76rem; }
+  .flow-candidato em { font-style: normal; color: var(--text-3); display: block; font-size: .74rem; }
+
+  /* ── Mensagens ─────────────────────────────────────────────────────────── */
+  .flow-aviso {
+    padding: .65rem .85rem; border-radius: var(--radius-sm); font-size: .82rem;
+    border: 1px solid var(--border-1); background: var(--surface-2); color: var(--text-2);
+  }
+  .flow-aviso.erro { background: #fff1ef; border-color: #f0c4bd; color: #97382e; }
+  .flow-aviso.ok { background: var(--success-100); border-color: #b9e2d5; color: var(--success-700); }
+  .flow-aviso.atencao { background: #fff8e6; border-color: #f0dcae; color: #7a5300; }
+
+  .flow-vazio { padding: 2.5rem 1rem; text-align: center; color: var(--text-3); }
+  .flow-vazio strong { display: block; color: var(--text-2); margin-bottom: .25rem; }
+
+  .flow-toast {
+    position: fixed; bottom: 1.2rem; left: 50%; transform: translateX(-50%) translateY(1rem);
+    z-index: 90; padding: .65rem 1.1rem; border-radius: 999px; font-size: .85rem;
+    background: var(--text-1); color: var(--surface-1); box-shadow: var(--shadow-2);
+    opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s;
+  }
+  .flow-toast.visivel { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .flow-toast.erro { background: #97382e; }
+  .flow-toast.ok { background: var(--success-700); }
+
+  /* ── Carregando ────────────────────────────────────────────────────────── */
+  .flow-carregando { display: flex; align-items: center; gap: .5rem; color: var(--text-3); font-size: .82rem; padding: 1.5rem; justify-content: center; }
+  .flow-spin {
+    width: 1rem; height: 1rem; border-radius: 999px; flex: 0 0 auto;
+    border: 2px solid var(--border-2); border-top-color: var(--brand-700);
+    animation: flow-girar .7s linear infinite;
+  }
+  @keyframes flow-girar { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .flow-spin { animation-duration: 2.4s; } }
+
+  .flow-barra-progresso { height: .35rem; border-radius: 999px; background: var(--surface-3); overflow: hidden; margin-top: .4rem; }
+  .flow-barra-progresso i { display: block; height: 100%; background: var(--brand-600); transition: width .2s; }
+
+  /* ── Login ─────────────────────────────────────────────────────────────── */
+  .flow-login { min-height: 100vh; display: grid; place-items: center; padding: 1.5rem; background: var(--surface-0); }
+  .flow-login-card {
+    width: min(26rem, 100%); background: var(--surface-1); border: 1px solid var(--border-1);
+    border-radius: var(--radius-lg); padding: 1.8rem; box-shadow: var(--shadow-1);
+  }
+  .flow-login-card img { height: 40px; margin-bottom: 1.1rem; }
+  .flow-login-card h1 { font-size: 1.25rem; margin: 0 0 .3rem; }
+  .flow-login-card > p { margin: 0 0 1.2rem; font-size: .84rem; color: var(--text-3); }
+  .flow-login-card .flow-campo + .flow-campo { margin-top: .8rem; }
+  .flow-login-card .primary-button { width: 100%; margin-top: 1.1rem; justify-content: center; }
+  .flow-login-alt { margin-top: .9rem; text-align: center; font-size: .8rem; }
+  .flow-login-alt button { background: none; border: none; color: var(--brand-700); cursor: pointer; text-decoration: underline; padding: .2rem; }
+
+  /* ── Portais de entrada ────────────────────────────────────────────────── */
+  .flow-portais { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); }
+  .flow-portal {
+    display: block; padding: 1.4rem; border: 1px solid var(--border-1); border-radius: var(--radius-md);
+    background: var(--surface-1); text-decoration: none; color: inherit; transition: border-color .15s, box-shadow .15s;
+  }
+  .flow-portal:hover { border-color: var(--brand-600); box-shadow: var(--shadow-1); }
+  .flow-portal svg { width: 26px; height: 26px; fill: none; stroke: var(--brand-700); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; margin-bottom: .6rem; }
+  .flow-portal strong { display: block; font-size: 1rem; color: var(--brand-strong); margin-bottom: .2rem; }
+  .flow-portal span { font-size: .84rem; color: var(--text-3); }
+
+  /* ── Recibo do envio ───────────────────────────────────────────────────── */
+  .flow-recibo { text-align: center; padding: 1.5rem .5rem; }
+  .flow-recibo-selo {
+    width: 3.2rem; height: 3.2rem; border-radius: 999px; display: grid; place-items: center;
+    background: var(--success-100); color: var(--success-700); margin: 0 auto .9rem; font-size: 1.5rem;
+  }
+  .flow-recibo h2 { margin: 0 0 .3rem; }
+  .flow-protocolo {
+    display: inline-block; margin: .8rem 0; padding: .5rem 1.1rem; border-radius: var(--radius-sm);
+    background: var(--brand-100); color: var(--brand-800);
+    font-family: var(--font-mono); font-size: 1.15rem; font-weight: 700; letter-spacing: .02em;
+  }
+
+  /* ── Abas internas do painel ───────────────────────────────────────────── */
+  .flow-abas { display: flex; gap: .25rem; border-bottom: 1px solid var(--border-1); margin-bottom: var(--space-5); flex-wrap: wrap; }
+  .flow-aba {
+    padding: .55rem .9rem; border: none; background: none; cursor: pointer;
+    font-size: .86rem; font-weight: 600; color: var(--text-3);
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .flow-aba:hover { color: var(--brand-800); }
+  .flow-aba[aria-selected="true"] { color: var(--brand-800); border-bottom-color: var(--brand-700); }
+
+  @media (max-width: 640px) {
+    .flow-evento { grid-template-columns: 1fr; gap: .1rem; }
+    .flow-topbar { flex-wrap: wrap; }
+  }
+}
