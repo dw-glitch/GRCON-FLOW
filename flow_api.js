@@ -455,7 +455,10 @@
     async listar() {
       return chamar(
         client.from("flow_lds")
-          .select("*, versoes:flow_ld_versions(id,revision_label,file_name,document_count,status,created_at,activated_at,uploaded_by_name,error_message,source_hash,import_report,sheets)")
+          // Há duas relações entre LD e versão: a coleção histórica (ld_id) e
+          // a versão vigente (current_version_id). Informar a FK evita o HTTP
+          // 300 "Multiple Choices" do PostgREST quando a aba é aberta.
+          .select("*, versoes:flow_ld_versions!flow_ld_versions_ld_id_fkey(id,revision_label,file_name,document_count,status,created_at,activated_at,uploaded_by_name,error_message,source_hash,import_report,sheets)")
           .order("display_order", { ascending: true }),
         "listar LDs"
       );
