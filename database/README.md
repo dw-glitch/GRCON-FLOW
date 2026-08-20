@@ -25,6 +25,7 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_15_seed_norm_versions` | Garante as revisões normativas iniciais em projetos já migrados |
 | `flow_16_norm_sources_and_files` | Corrige metadados, separa os anexos A–G da N-1710 e permite anexar PDFs às revisões iniciais |
 | `flow_17_request_attachments` | Completa os formatos de anexos do solicitante e mantém o bucket privado em 25 MB |
+| `flow_18_secure_request_deletion` | Exclusão permanente por administrador/proprietário, com anexos removidos pelo Storage API |
 
 ## Tabelas
 
@@ -87,6 +88,7 @@ se alcança nem a lista de tipos.
 | `flow_ingest_ld_documents(versao, docs)` | Grava um lote de documentos indexados. |
 | `flow_activate_ld_version(versao)` | Ativa a revisão e inativa a anterior. |
 | `flow_update_items(...)` / `flow_update_request(...)` | Alterações do painel, com histórico. |
+| `flow_delete_request(id)` | Exclui permanentemente uma solicitação; somente administrador ou proprietário. |
 | `flow_track_protocol(protocolo)` | Acompanhamento — devolve só o que o solicitante pode ver. |
 | `flow_set_user_role(user, papel)` | Troca de papel, com as regras de quem pode; espelha na lista de acesso. |
 | `flow_acesso_para(email)` | A regra de quem entra e com que papel. Uso interno. |

@@ -392,6 +392,39 @@
       abrirFicha(solicitacao.id);
     };
 
+    const excluir = async (evento) => {
+      const protocolo = texto(solicitacao.protocol).toUpperCase();
+      const digitado = root.prompt(
+        `A exclusão é permanente e remove itens, histórico, comentários e anexos.\n\nPara continuar, digite o protocolo ${protocolo}:`,
+        ""
+      );
+      if (digitado === null) return;
+      if (texto(digitado).toUpperCase() !== protocolo) {
+        avisar("Protocolo diferente. A solicitação não foi excluída.", "erro");
+        return;
+      }
+      if (!Ui.confirmar(`Excluir permanentemente ${protocolo}? Esta ação não pode ser desfeita.`)) return;
+
+      const botao = evento.currentTarget;
+      botao.disabled = true;
+      botao.textContent = "Excluindo…";
+      const { error } = await Api.solicitacoes.excluir(solicitacao.id, solicitacao.anexos || []);
+      if (error) {
+        botao.disabled = false;
+        botao.textContent = "Excluir solicitação";
+        avisar(error, "erro");
+        return;
+      }
+
+      estado.selecionadas.delete(solicitacao.id);
+      estado.aberta = null;
+      document.getElementById("painel-drawer").classList.remove("aberto");
+      avisar(`${protocolo} excluída permanentemente.`, "ok");
+      await carregarSolicitacoes();
+      const indicadores = document.getElementById("painel-indicadores");
+      if (indicadores) montarIndicadores(indicadores);
+    };
+
     return elemento("section", { class: "flow-card" }, [
       elemento("div", { class: "flow-card-head" }, [
         elemento("h3", { text: "Operação" }),
@@ -413,6 +446,9 @@
         elemento("button", { class: "primary-button", type: "button", text: "Salvar", onclick: salvar }),
         tipo && tipo.uses_ld
           ? elemento("button", { class: "secondary-button", type: "button", text: "Reprocessar triagem", onclick: reprocessar })
+          : null,
+        Api.auth.ehAdmin()
+          ? elemento("button", { class: "danger-button", type: "button", text: "Excluir solicitação", onclick: excluir })
           : null,
       ]),
     ]);

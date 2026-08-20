@@ -457,6 +457,31 @@ check("o painel baixa o anexo privado mantendo o nome original", () => {
   assert.match(painel, /download: anexo\.file_name/);
 });
 
+check("a exclusão remove anexos antes da solicitação e fica restrita a administradores", () => {
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  const remocaoStorage = api.indexOf('client.storage.from("flow-anexos").remove(caminhos)');
+  const remocaoBanco = api.indexOf('client.rpc("flow_delete_request"');
+  assert.ok(remocaoStorage > -1, "os objetos precisam ser removidos pelo Storage API");
+  assert.ok(remocaoBanco > remocaoStorage, "o banco só deve ser apagado depois dos objetos");
+  assert.match(api, /if \(!auth\.ehAdmin\(\)\)/, "a interface de dados precisa bloquear operador e solicitante");
+
+  const migration = fs.readFileSync(path.join(root, "database/migrations/flow_18_secure_request_deletion.sql"), "utf8");
+  assert.match(migration, /security definer/i);
+  assert.match(migration, /auth\.uid\(\)/i);
+  assert.match(migration, /flow_is_admin\(\)/i);
+  assert.match(migration, /revoke all on function public\.flow_delete_request\(uuid\)/i);
+  assert.match(migration, /grant execute on function public\.flow_delete_request\(uuid\) to authenticated/i);
+});
+
+check("o painel exige o protocolo e confirmação antes da exclusão permanente", () => {
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /text: "Excluir solicitação"/);
+  assert.match(painel, /Api\.auth\.ehAdmin\(\)/);
+  assert.match(painel, /root\.prompt\(/);
+  assert.match(painel, /Ui\.confirmar\(`Excluir permanentemente/);
+  assert.match(painel, /Api\.solicitacoes\.excluir\(solicitacao\.id, solicitacao\.anexos \|\| \[\]\)/);
+});
+
 check("a configuração publicada não carrega chave secreta", () => {
   const config = fs.readFileSync(path.join(root, "flow_config.js"), "utf8");
   assert.doesNotMatch(config, /sb_secret_/, "chave secreta jamais vai para o navegador");
