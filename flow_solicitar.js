@@ -609,5 +609,7 @@
     }
     estado.tipos = data;
     montarPagina();
+    // Quem chegou aqui recusado em outra área lê o motivo agora.
+    root.FlowUi.avisoDaUrl();
   })();
 })(window);

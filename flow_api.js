@@ -587,6 +587,58 @@
     },
   };
 
+  // ---------------------------------------------------------------------------
+  // Acesso — quem pode entrar e com que papel
+  // ---------------------------------------------------------------------------
+  const acesso = {
+    /** Domínios de e-mail autorizados a se cadastrar. */
+    async dominios() {
+      const { data, error } = await chamar(
+        client.from("flow_settings").select("value").eq("key", "acesso").maybeSingle(),
+        "carregar domínios"
+      );
+      if (error) return { data: [], error };
+      const lista = data && data.value ? data.value.dominios : [];
+      return { data: Array.isArray(lista) ? lista : [], error: null };
+    },
+
+    async definirDominios(lista) {
+      return chamar(
+        client.rpc("flow_definir_dominios", { p_dominios: lista || [] }),
+        "salvar domínios"
+      );
+    },
+
+    /** Lista de e-mails da equipe. Só administrador enxerga. */
+    async listar() {
+      return chamar(
+        client.from("flow_access_allowlist").select("*").order("email", { ascending: true }),
+        "listar acessos"
+      );
+    },
+
+    /**
+     * Autoriza um e-mail com um papel. Se a pessoa já tem conta, o banco a
+     * promove na mesma chamada — não é preciso pedir que ela recrie o cadastro.
+     */
+    async definir(email, papel, nota) {
+      return chamar(
+        client.rpc("flow_definir_acesso", {
+          p_email: texto(email), p_role: papel || "operador", p_note: texto(nota),
+        }),
+        "autorizar e-mail"
+      );
+    },
+
+    /** Tira da lista. Não rebaixa quem já entrou — isso é ato explícito. */
+    async remover(email) {
+      return chamar(
+        client.rpc("flow_remover_acesso", { p_email: texto(email) }),
+        "remover autorização"
+      );
+    },
+  };
+
   const exportacao = {
     /** Linhas cruas da exportação. A montagem das colunas fica em flow_export.js. */
     async linhas(filtros = {}) {
@@ -609,6 +661,6 @@
 
   root.FlowApi = Object.freeze({
     client, config, auth, tipos, solicitacoes, itens, triagem, lds,
-    comentarios, anexos, historico, notificacoes, usuarios, exportacao,
+    comentarios, anexos, historico, notificacoes, usuarios, acesso, exportacao,
   });
 })(window);

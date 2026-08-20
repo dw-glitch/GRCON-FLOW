@@ -225,6 +225,62 @@ check("nenhum vestígio do banco do GRCON principal", () => {
     });
 });
 
+// ── Separação entre solicitante e equipe ───────────────────────────────────
+
+check("a raiz é um roteador, não uma tela de escolha", () => {
+  // A tela que perguntava "o que você quer fazer?" obrigava todo mundo a um
+  // clique para chegar ao único lugar que lhe interessava.
+  const home = fs.readFileSync(path.join(root, "flow_home.js"), "utf8");
+  assert.doesNotMatch(home, /montarInicio|flow-portais|flow-portal/, "sobrou a tela de escolha");
+  assert.match(home, /function destinoDoPapel/);
+  assert.match(home, /ehEquipe\(\)\s*\?\s*"\/painel"\s*:\s*"\/solicitar"/,
+    "a equipe vai para o painel e o restante para o formulário");
+  const css = fs.readFileSync(path.join(root, "flow.css"), "utf8");
+  assert.doesNotMatch(css, /\.flow-portal/, "sobrou o CSS dos portais");
+});
+
+check("o encaminhamento espera o perfil carregar", () => {
+  // `ehEquipe()` lê o perfil; decidir antes dele existir jogaria a equipe em
+  // /solicitar por um instante, e ela veria a tela errada piscar.
+  const home = fs.readFileSync(path.join(root, "flow_home.js"), "utf8");
+  assert.match(home, /Api\.auth\.session && Api\.auth\.profile/);
+  assert.match(home, /aoMudar\(\(sessao, perfil\) => \{\s*if \(sessao && perfil\) encaminhar\(\);/);
+});
+
+check("uma rota protegida tem prioridade sobre o destino do papel", () => {
+  // Quem clicou num link para /painel e precisou entrar volta para lá.
+  const home = fs.readFileSync(path.join(root, "flow_home.js"), "utf8");
+  assert.match(home, /destinoPretendido\(\) \|\| destinoDoPapel\(\)/);
+});
+
+check("a equipe lê o painel como primeiro link do topo", () => {
+  const ui = fs.readFileSync(path.join(root, "flow_ui.js"), "utf8");
+  assert.match(ui, /links\.unshift\(\{ href: "\/painel"/,
+    "o painel precisa vir antes, não depois");
+});
+
+check("o aviso de área restrita sobrevive ao redirecionamento", () => {
+  // Mostrado na página que está sendo abandonada, o aviso sumiria com ela.
+  const ui = fs.readFileSync(path.join(root, "flow_ui.js"), "utf8");
+  assert.match(ui, /\/solicitar\?aviso=\$\{encodeURIComponent\(motivo\)\}/);
+  assert.match(ui, /function avisoDaUrl/);
+  const solicitar = fs.readFileSync(path.join(root, "flow_solicitar.js"), "utf8");
+  assert.match(solicitar, /avisoDaUrl\(\)/, "a página de destino precisa mostrar o aviso");
+});
+
+check("a aba Acesso é de administrador e existe de ponta a ponta", () => {
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /\{ chave: "acesso", rotulo: "Acesso", admin: true \}/);
+  assert.match(painel, /montarAcesso\(conteudo\)/, "a aba precisa ser despachada");
+  const admin = fs.readFileSync(path.join(root, "flow_admin.js"), "utf8");
+  assert.match(admin, /montarTipos, montarUsuarios, montarAcesso/, "e exportada");
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  ["dominios", "definirDominios", "listar", "definir", "remover"].forEach((metodo) => {
+    assert.match(api, new RegExp(`\\b${metodo}\\b`), `falta ${metodo} no grupo acesso`);
+  });
+  assert.match(api, /usuarios, acesso, exportacao/, "o grupo acesso precisa ser exportado");
+});
+
 check("a configuração publicada não carrega chave secreta", () => {
   const config = fs.readFileSync(path.join(root, "flow_config.js"), "utf8");
   assert.doesNotMatch(config, /sb_secret_/, "chave secreta jamais vai para o navegador");

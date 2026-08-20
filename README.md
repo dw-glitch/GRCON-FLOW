@@ -36,7 +36,10 @@ Histórico completo · Exportação do Controle de Solicitações
 | --- | --- | --- |
 | `/solicitar` | qualquer usuário | Escolhe o serviço e registra o pedido. Formulário muda por tipo. |
 | `/acompanhar` | quem solicitou | Consulta pelo protocolo e lista os próprios pedidos. |
-| `/painel` | operação | Dashboard, triagem, distribuição, Base de LDs, tipos e usuários. |
+| `/painel` | equipe de qualidade | Dashboard, triagem, distribuição, Base de LDs, tipos, usuários e acesso. |
+
+A raiz `/` não é uma tela: é um roteador. Quem solicita cai no formulário, a
+equipe cai no painel — cada um já abre no seu lugar.
 
 O solicitante não alcança o painel — nem pela tela, nem pela API: a RLS do
 banco recusa.
@@ -145,9 +148,26 @@ apenas os itens selecionados.
 | **Administrador** | Tudo do operador + tipos, LDs, responsáveis e usuários. |
 | **Proprietário** | Controle total, inclusive promover outro proprietário. |
 
-Quem se cadastra entra como **solicitante**. O **primeiro** usuário do sistema
-vira **proprietário** automaticamente — sem isso não haveria como administrar o
-aplicativo recém-publicado.
+### Quem pode entrar
+
+Duas travas independentes, ambas em **Painel → Acesso**:
+
+- **Domínios autorizados** — só e-mails desses domínios conseguem criar conta, e
+  entram como **solicitante**. Já vem com `agnet.com.br`. Lista vazia = cadastro
+  aberto a qualquer e-mail, e a tela avisa disso em destaque.
+- **Lista da equipe** — e-mails que entram direto como **operador** (ou o papel
+  que você escolher). A lista **passa por cima do domínio**, o que permite dar
+  acesso a um consultor de fora sem abrir a empresa inteira.
+
+Acrescentar à lista alguém que já tem conta **promove na hora** — não é preciso
+recriar o cadastro. Tirar da lista impede um cadastro novo com aquele papel, mas
+**não rebaixa** quem já entrou; rebaixar é ato explícito, em Painel → Usuários.
+
+Promover ou rebaixar em Usuários mantém a lista em dia automaticamente, para as
+duas telas nunca discordarem.
+
+O **primeiro** usuário do sistema vira **proprietário** automaticamente — sem
+isso não haveria como administrar o aplicativo recém-publicado.
 
 As permissões são aplicadas na tela **e** no banco (RLS + funções que conferem o
 papel). A tela só evita mostrar o que geraria erro; quem recusa de verdade é o
@@ -157,14 +177,33 @@ Postgres.
 
 ## Primeiro acesso
 
-1. Abra a aplicação publicada.
-2. **Criar conta** — o primeiro cadastro vira proprietário.
+### Antes de tudo: dois ajustes no painel do Supabase
+
+Nenhum dos dois se resolve por código, e **sem o primeiro ninguém consegue
+entrar**.
+
+1. **Confirmação de e-mail.** O projeto usa o SMTP padrão do Supabase, que só
+   entrega para membros do projeto e é fortemente limitado — um colega que se
+   cadastre não recebe o e-mail e fica de fora. Em *Authentication → Providers →
+   Email*, desmarque **Confirm email**; ou configure o SMTP da empresa em
+   *Authentication → Emails → SMTP Settings*, que é o certo a médio prazo.
+
+2. **Hook de cadastro.** Em *Authentication → Hooks*, ative **Before User
+   Created** apontando para `public.flow_antes_de_criar_usuario`. É o que faz a
+   recusa por domínio chegar como uma frase legível. Sem o hook o cadastro
+   **continua sendo barrado** — só que a pessoa vê `Database error saving new
+   user` em vez do motivo.
+
+### Depois
+
+1. Abra a aplicação e **crie sua conta** — o primeiro cadastro vira proprietário.
+2. **Painel → Acesso** — confira os domínios e cadastre os e-mails da equipe de
+   qualidade.
 3. **Painel → Base de LDs** — cadastre suas LDs e publique a revisão vigente de
    cada uma.
 4. **Painel → Tipos de solicitação** — ajuste rótulos, prazos e campos.
-5. **Painel → Usuários** — promova a operador ou administrador quem for
-   trabalhar nas solicitações.
-6. Divulgue `/solicitar` para quem faz pedidos.
+5. Divulgue o link. Quem for da empresa se cadastra e já cai no formulário;
+   quem estiver na lista da equipe cai no painel.
 
 Sem LD publicada o aplicativo funciona: as solicitações são registradas e ficam
 como "não localizado" ou "identificação pendente" até a base entrar.

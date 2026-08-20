@@ -344,5 +344,161 @@
     );
   }
 
-  root.FlowAdmin = Object.freeze({ montarTipos, montarUsuarios });
+  // ---------------------------------------------------------------------------
+  // Acesso — quem entra e com que papel
+  //
+  // Duas travas independentes:
+  //   • o domínio decide quem pode CRIAR conta (e entra como solicitante);
+  //   • a lista de e-mails decide quem é da EQUIPE — e passa por cima do
+  //     domínio, para dar acesso a alguém de fora sem abrir a empresa inteira.
+  // ---------------------------------------------------------------------------
+  const PAPEIS_DE_EQUIPE = [
+    ["operador", "Operador — trabalha nas solicitações"],
+    ["administrador", "Administrador — também cuida de tipos, LDs e usuários"],
+    ["proprietario", "Proprietário — controle total"],
+  ];
+
+  function blocoDominios(dominios, recarregar) {
+    const atual = dominios.slice();
+    const etiquetas = elemento("div", { class: "flow-etiquetas" });
+
+    const desenhar = () => {
+      etiquetas.replaceChildren(...atual.map((dominio, indice) =>
+        elemento("span", { class: "flow-etiqueta" }, [
+          `@${dominio}`,
+          elemento("button", {
+            type: "button", "aria-label": `Remover ${dominio}`, text: "×",
+            onclick: () => { atual.splice(indice, 1); desenhar(); },
+          }),
+        ])
+      ));
+      if (!atual.length) {
+        etiquetas.append(elemento("span", { style: "font-size:.82rem;color:var(--text-3)", text: "Nenhum domínio — o cadastro está aberto a qualquer e-mail." }));
+      }
+    };
+    desenhar();
+
+    const novo = elemento("input", { id: "dominio-novo", type: "text", placeholder: "agnet.com.br", autocomplete: "off" });
+    const acrescentar = () => {
+      const valor = texto(novo.value).replace(/^@/, "").toLowerCase();
+      if (!valor) return;
+      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(valor)) { avisar("Domínio inválido.", "erro"); return; }
+      if (!atual.includes(valor)) atual.push(valor);
+      novo.value = "";
+      desenhar();
+    };
+    novo.addEventListener("keydown", (evento) => {
+      if (evento.key === "Enter") { evento.preventDefault(); acrescentar(); }
+    });
+
+    return elemento("section", { class: "flow-card" }, [
+      elemento("div", { class: "flow-card-head" }, [
+        elemento("h3", { text: "Quem pode criar conta" }),
+        elemento("p", { text: "Só e-mails destes domínios conseguem se cadastrar. Eles entram como solicitantes e veem apenas o formulário e os próprios pedidos." }),
+      ]),
+      atual.length ? null : elemento("div", { class: "flow-aviso atencao", text:
+        "Enquanto não houver nenhum domínio aqui, qualquer pessoa da internet pode criar conta no GRCON Flow." }),
+      etiquetas,
+      elemento("div", { class: "flow-filtros", style: "margin:.6rem 0 0" }, [
+        elemento("label", { class: "flow-campo busca", for: "dominio-novo" }, [
+          elemento("span", { text: "Acrescentar domínio" }), novo,
+        ]),
+        elemento("button", { class: "secondary-button compact", type: "button", text: "Acrescentar", onclick: acrescentar }),
+        elemento("button", {
+          class: "primary-button compact", type: "button", text: "Salvar domínios",
+          onclick: async () => {
+            const { error } = await Api.acesso.definirDominios(atual);
+            if (error) { avisar(error, "erro"); return; }
+            avisar("Domínios atualizados.", "ok");
+            recarregar();
+          },
+        }),
+      ]),
+    ]);
+  }
+
+  function blocoEquipe(lista, recarregar) {
+    const corpo = elemento("tbody");
+    lista.forEach((entrada) => {
+      corpo.append(elemento("tr", {}, [
+        elemento("td", {}, [elemento("code", { text: entrada.email })]),
+        elemento("td", { text: Ui.rotuloPapel(entrada.role) }),
+        elemento("td", { text: entrada.note || "—" }),
+        elemento("td", {}, [
+          elemento("button", {
+            class: "text-button danger", type: "button", text: "Remover",
+            onclick: async () => {
+              if (!Ui.confirmar(`Tirar ${entrada.email} da lista?\n\nQuem já entrou continua com o papel atual — para rebaixar, use a aba Usuários.`)) return;
+              const { error } = await Api.acesso.remover(entrada.email);
+              if (error) { avisar(error, "erro"); return; }
+              avisar("Autorização removida.", "ok");
+              recarregar();
+            },
+          }),
+        ]),
+      ]));
+    });
+
+    if (!lista.length) {
+      corpo.append(elemento("tr", {}, [
+        elemento("td", { colspan: "4", style: "color:var(--text-3)", text:
+          "Ninguém autorizado ainda. Enquanto isso, todo mundo que se cadastrar entra como solicitante." }),
+      ]));
+    }
+
+    return elemento("section", { class: "flow-card" }, [
+      elemento("div", { class: "flow-card-head" }, [
+        elemento("h3", { text: "Equipe de qualidade" }),
+        elemento("p", { text: "Estes e-mails entram direto no painel, com o papel escolhido. A autorização vale mesmo que o e-mail seja de fora dos domínios acima." }),
+      ]),
+      elemento("div", { class: "flow-tabela-wrap" }, [
+        elemento("table", { class: "flow-tabela" }, [
+          elemento("thead", {}, [
+            elemento("tr", {}, ["E-mail", "Papel", "Observação", ""].map((r) => elemento("th", { text: r }))),
+          ]),
+          corpo,
+        ]),
+      ]),
+      elemento("div", { class: "flow-grid", style: "margin-top:1rem" }, [
+        campo("acesso-email", "E-mail", "", { placeholder: "nome@agnet.com.br" }),
+        campo("acesso-papel", "Papel", "operador", { tipo: "select", opcoes: PAPEIS_DE_EQUIPE }),
+        campo("acesso-nota", "Observação", "", { placeholder: "Equipe de qualidade" }),
+      ]),
+      elemento("div", { class: "flow-acoes", style: "margin-top:.7rem" }, [
+        elemento("button", {
+          class: "primary-button", type: "button", text: "Autorizar",
+          onclick: async () => {
+            const email = texto(ler("acesso-email")).toLowerCase();
+            if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { avisar("Informe um e-mail válido.", "erro"); return; }
+            const { data, error } = await Api.acesso.definir(email, ler("acesso-papel"), ler("acesso-nota"));
+            if (error) { avisar(error, "erro"); return; }
+            avisar(data && data.promovido_agora
+              ? `${email} já tinha conta e foi promovido agora.`
+              : `${email} autorizado. Assim que criar a conta, cai no painel.`, "ok");
+            recarregar();
+          },
+        }),
+      ]),
+      elemento("small", { style: "display:block;margin-top:.7rem;color:var(--text-3)", text:
+        "Tirar alguém da lista impede um cadastro novo com aquele papel, mas não rebaixa quem já está dentro — para isso, use a aba Usuários." }),
+    ]);
+  }
+
+  async function montarAcesso(destino) {
+    Ui.carregando(destino, "Carregando o acesso…");
+    const [dominios, equipe] = await Promise.all([Api.acesso.dominios(), Api.acesso.listar()]);
+    if (dominios.error || equipe.error) {
+      Ui.vazio(destino, "Não foi possível carregar", dominios.error || equipe.error);
+      return;
+    }
+    const recarregar = () => montarAcesso(destino);
+    destino.replaceChildren(
+      elemento("div", { class: "flow-aviso", text:
+        "Duas perguntas diferentes: o domínio diz quem pode criar conta; a lista de e-mails diz quem é da equipe e vê o painel." }),
+      blocoDominios(dominios.data, recarregar),
+      blocoEquipe(equipe.data || [], recarregar)
+    );
+  }
+
+  root.FlowAdmin = Object.freeze({ montarTipos, montarUsuarios, montarAcesso });
 })(window);

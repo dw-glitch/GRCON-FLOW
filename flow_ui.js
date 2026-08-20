@@ -184,11 +184,13 @@
     const perfil = Api.auth.profile || {};
     const equipe = Api.auth.ehEquipe();
 
+    // A ordem comunica de quem é a tela: o primeiro link é onde aquela pessoa
+    // trabalha. A equipe abre no painel; quem solicita, no formulário.
     const links = [
       { href: "/solicitar", rotulo: "Nova solicitação", chave: "solicitar" },
       { href: "/acompanhar", rotulo: "Acompanhar", chave: "acompanhar" },
     ];
-    if (equipe) links.push({ href: "/painel", rotulo: "Painel", chave: "painel" });
+    if (equipe) links.unshift({ href: "/painel", rotulo: "Painel", chave: "painel" });
 
     const nav = elemento("nav", { "aria-label": "Áreas do GRCON Flow" },
       links.map((link) => elemento("a", {
@@ -243,17 +245,26 @@
       root.location.replace(`/?destino=${destino}`);
       return null;
     }
-    if (admin && !Api.auth.ehAdmin()) {
-      avisar("Esta área é restrita a administradores.", "erro");
-      root.location.replace("/solicitar");
+    // O aviso viaja por query: mostrado na página que está sendo abandonada,
+    // ele desapareceria junto com ela e a pessoa não saberia por que voltou.
+    const recusar = (motivo) => {
+      root.location.replace(`/solicitar?aviso=${encodeURIComponent(motivo)}`);
       return null;
-    }
-    if (equipe && !Api.auth.ehEquipe()) {
-      avisar("Esta área é restrita à equipe de operação.", "erro");
-      root.location.replace("/solicitar");
-      return null;
-    }
+    };
+    if (admin && !Api.auth.ehAdmin()) return recusar("Esta área é restrita a administradores.");
+    if (equipe && !Api.auth.ehEquipe()) return recusar("Esta área é restrita à equipe de operação.");
     return Api.auth.profile;
+  }
+
+  /** Mostra o aviso que veio de um redirecionamento e limpa a URL. */
+  function avisoDaUrl() {
+    const parametros = new URLSearchParams(root.location.search);
+    const aviso = parametros.get("aviso");
+    if (!aviso) return;
+    avisar(aviso, "erro");
+    parametros.delete("aviso");
+    const busca = parametros.toString();
+    root.history.replaceState({}, "", root.location.pathname + (busca ? `?${busca}` : ""));
   }
 
   /** Confirmação simples, para ações que apagam ou publicam algo. */
@@ -266,7 +277,7 @@
     CLASSIFICACOES, STATUS, PAPEIS,
     rotuloStatus, rotuloPapel, seloClassificacao, seloStatus, seloPrazo, situacaoPrazo,
     data, dataHora, iniciais,
-    avisar, carregando, vazio, confirmar,
+    avisar, carregando, vazio, confirmar, avisoDaUrl,
     montarTopo, montarRodape, exigirSessao,
   });
 })(window);

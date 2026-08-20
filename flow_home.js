@@ -115,12 +115,12 @@
       if (resultado.error) { erro.hidden = false; erro.textContent = resultado.error; return; }
 
       if (modo === "entrar") {
-        const destino = destinoPretendido();
-        root.location.href = destino || "/";
+        encaminhar();
       } else if (modo === "cadastrar") {
         // Conforme a configuração do Auth, a conta pode já entrar ou precisar de
         // confirmação por e-mail. As duas respostas são ditas com clareza.
-        if (Api.auth.session) { root.location.href = "/solicitar"; return; }
+        // Quem estava na lista da equipe já nasce operador e vai para o painel.
+        if (Api.auth.session && Api.auth.profile) { encaminhar(); return; }
         render("entrar");
         avisar("Conta criada. Confirme seu e-mail, se pedirmos, e entre.", "ok");
       } else {
@@ -133,60 +133,37 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Escolha do destino
+  // Para onde cada um vai
+  //
+  // A raiz não é uma tela: é um roteador. Quem solicita cai no formulário, a
+  // equipe cai no painel. Não existe mais a página que perguntava "o que você
+  // quer fazer?" — ela obrigava todo mundo a um clique para chegar ao único
+  // lugar que interessava àquela pessoa.
   // ---------------------------------------------------------------------------
-  const ICONES = {
-    solicitar: "M12 5v14M5 12h14",
-    acompanhar: "M4 12a8 8 0 1 0 2.3-5.7L4 8M4 4v4h4M12 8v5l3 2",
-    painel: "M4 19V9M10 19V5M16 19v-7M3 19h18",
-  };
-
-  function portal(href, icone, titulo, detalhe) {
-    return elemento("a", { class: "flow-portal", href }, [
-      elemento("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", html: `<path d="${ICONES[icone]}"></path>` }),
-      elemento("strong", { text: titulo }),
-      elemento("span", { text: detalhe }),
-    ]);
+  function destinoDoPapel() {
+    return Api.auth.ehEquipe() ? "/painel" : "/solicitar";
   }
 
-  function montarInicio() {
-    const perfil = Api.auth.profile || {};
-    const equipe = Api.auth.ehEquipe();
-
-    const portais = [
-      portal("/solicitar", "solicitar", "Fazer uma solicitação",
-        "Escolha o serviço e informe apenas o que você sabe. O resto é conosco."),
-      portal("/acompanhar", "acompanhar", "Acompanhar um pedido",
-        "Veja em que ponto está cada solicitação que você registrou."),
-    ];
-    if (equipe) {
-      portais.push(portal("/painel", "painel", "Painel operacional",
-        "Receber, triar, distribuir, executar e concluir as solicitações."));
-    }
-
-    return elemento("div", { class: "flow-body" }, [
-      root.FlowUi.montarTopo({ ativo: "" }),
-      elemento("main", { class: "flow-main estreito" }, [
-        elemento("div", { class: "flow-page-head" }, [
-          elemento("h1", { text: `Olá, ${(perfil.full_name || perfil.email || "").split(" ")[0] || "bem-vindo"}.` }),
-          elemento("p", { text: "O que você precisa fazer agora?" }),
-        ]),
-        elemento("div", { class: "flow-portais" }, portais),
-      ]),
-      root.FlowUi.montarRodape(),
-    ]);
+  function encaminhar() {
+    // Uma rota protegida que rejeitou a visita tem prioridade sobre o padrão do
+    // papel: quem clicou num link para /painel e precisou entrar volta para lá.
+    root.location.replace(destinoPretendido() || destinoDoPapel());
   }
 
   function render(modo) {
-    app.replaceChildren(Api.auth.session ? montarInicio() : montarLogin(modo || "entrar"));
+    app.replaceChildren(montarLogin(modo || "entrar"));
   }
 
   (async function iniciar() {
     await Api.auth.iniciar();
-    // Quem já tem sessão e veio de uma rota protegida volta direto para ela.
-    const destino = destinoPretendido();
-    if (Api.auth.session && destino) { root.location.replace(destino); return; }
+
+    // `ehEquipe()` lê o perfil, que só existe depois de `iniciar()` resolver.
+    // Decidir antes disso mandaria a equipe para /solicitar por um instante.
+    if (Api.auth.session && Api.auth.profile) { encaminhar(); return; }
+
     render("entrar");
-    Api.auth.aoMudar(() => render("entrar"));
+    Api.auth.aoMudar((sessao, perfil) => {
+      if (sessao && perfil) encaminhar();
+    });
   })();
 })(window);
