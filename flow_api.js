@@ -756,16 +756,40 @@
 
   const notificacoes = {
     async listar() {
+      if (!state.session) return { data: [], error: null };
       return chamar(
-        client.from("flow_notifications").select("*").is("read_at", null)
-          .order("created_at", { ascending: false }).limit(20),
+        client.from("flow_notifications").select("*")
+          .eq("user_id", state.session.user.id).is("read_at", null)
+          .order("created_at", { ascending: false }).limit(30),
         "listar notificações"
       );
     },
+    async contarNaoLidas() {
+      if (!state.session) return { data: 0, error: null };
+      try {
+        const { count, error } = await client.from("flow_notifications")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", state.session.user.id).is("read_at", null);
+        if (error) return { data: 0, error: traduzErro(error, "contar notificações") };
+        return { data: Number(count) || 0, error: null };
+      } catch (erro) {
+        return { data: 0, error: traduzErro(erro, "contar notificações") };
+      }
+    },
     async marcarLida(id) {
+      if (!state.session) return { data: null, error: "Entre novamente para continuar." };
       return chamar(
-        client.from("flow_notifications").update({ read_at: new Date().toISOString() }).eq("id", id),
+        client.from("flow_notifications").update({ read_at: new Date().toISOString() })
+          .eq("id", id).eq("user_id", state.session.user.id),
         "marcar notificação"
+      );
+    },
+    async marcarTodasLidas() {
+      if (!state.session) return { data: null, error: "Entre novamente para continuar." };
+      return chamar(
+        client.from("flow_notifications").update({ read_at: new Date().toISOString() })
+          .eq("user_id", state.session.user.id).is("read_at", null),
+        "marcar todas as notificações"
       );
     },
     assinar(fn) {

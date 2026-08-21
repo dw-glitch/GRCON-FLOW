@@ -30,6 +30,11 @@
     selecionadas: new Set(),
     aberta: null,
     carregando: false,
+    notificacoes: [],
+    notificacoesTotal: 0,
+    notificacoesAbertas: false,
+    notificacoesMarcando: false,
+    notificacoesErro: "",
   };
 
   function tamanhoArquivo(bytes) {
@@ -977,6 +982,175 @@
     return gaveta;
   }
 
+  // ---------------------------------------------------------------------------
+  // Central de notificações — o aviso continua disponível mesmo após a pessoa
+  // sair do painel. A linha só deixa a caixa de entrada quando é aberta ou
+  // quando a equipe confirma a leitura de todas.
+  // ---------------------------------------------------------------------------
+  function iconeNotificacao() {
+    return elemento("svg", {
+      class: "flow-notificacoes-icone", viewBox: "0 0 24 24", "aria-hidden": "true",
+      html: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4"></path>',
+    });
+  }
+
+  function desenharNotificacoes() {
+    const botao = document.getElementById("painel-notificacoes-botao");
+    const menu = document.getElementById("painel-notificacoes-menu");
+    if (!botao || !menu) return;
+
+    const total = Math.max(0, Number(estado.notificacoesTotal) || 0);
+    botao.setAttribute("aria-expanded", estado.notificacoesAbertas ? "true" : "false");
+    botao.setAttribute("aria-label", total
+      ? `Notificações: ${total} não lida${total === 1 ? "" : "s"}`
+      : "Notificações: nenhuma não lida");
+    botao.replaceChildren(
+      iconeNotificacao(),
+      elemento("span", { text: "Notificações" }),
+      total ? elemento("span", {
+        class: "flow-notificacoes-badge", text: total > 99 ? "99+" : String(total),
+        "aria-live": "polite",
+      }) : null
+    );
+
+    menu.hidden = !estado.notificacoesAbertas;
+    const cabecalho = elemento("div", { class: "flow-notificacoes-cabecalho" }, [
+      elemento("div", {}, [
+        elemento("strong", { text: "Notificações" }),
+        elemento("small", { text: total
+          ? `${total} pendente${total === 1 ? "" : "s"} de leitura`
+          : "Tudo revisado" }),
+      ]),
+      total ? elemento("button", {
+        class: "text-button compact", type: "button",
+        text: estado.notificacoesMarcando ? "Confirmando…" : "Marcar todas como lidas",
+        disabled: estado.notificacoesMarcando,
+        onclick: marcarTodasNotificacoes,
+      }) : null,
+    ]);
+
+    let conteudo;
+    if (estado.notificacoesErro) {
+      conteudo = elemento("div", { class: "flow-notificacoes-vazio erro" }, [
+        elemento("strong", { text: "Não foi possível carregar" }),
+        elemento("span", { text: estado.notificacoesErro }),
+        elemento("button", {
+          class: "text-button compact", type: "button", text: "Tentar novamente",
+          onclick: carregarNotificacoes,
+        }),
+      ]);
+    } else if (!estado.notificacoes.length) {
+      conteudo = elemento("div", { class: "flow-notificacoes-vazio" }, [
+        elemento("strong", { text: "Nenhuma pendência nova" }),
+        elemento("span", { text: "As próximas solicitações aparecerão aqui." }),
+      ]);
+    } else {
+      conteudo = elemento("div", { class: "flow-notificacoes-lista" },
+        estado.notificacoes.map((notificacao) => {
+          const titulo = texto(notificacao.title) || "Nova solicitação";
+          const corpo = texto(notificacao.body) || "Abra para consultar os detalhes.";
+          return elemento("button", {
+            class: "flow-notificacao-item", type: "button",
+            "aria-label": `${titulo}. ${corpo}. Abrir solicitação`,
+            onclick: () => abrirNotificacao(notificacao),
+          }, [
+            elemento("span", { class: "flow-notificacao-item-topo" }, [
+              elemento("strong", { text: titulo }),
+              elemento("time", {
+                datetime: texto(notificacao.created_at), text: dataHora(notificacao.created_at),
+              }),
+            ]),
+            elemento("span", { class: "flow-notificacao-item-corpo", text: corpo }),
+          ]);
+        })
+      );
+    }
+    menu.replaceChildren(cabecalho, conteudo);
+  }
+
+  async function carregarNotificacoes() {
+    estado.notificacoesErro = "";
+    const [lista, contagem] = await Promise.all([
+      Api.notificacoes.listar(),
+      Api.notificacoes.contarNaoLidas(),
+    ]);
+    if (lista.error || contagem.error) {
+      estado.notificacoesErro = lista.error || contagem.error;
+    }
+    if (!lista.error) estado.notificacoes = lista.data || [];
+    estado.notificacoesTotal = contagem.error
+      ? estado.notificacoes.length
+      : Math.max(0, Number(contagem.data) || 0);
+    desenharNotificacoes();
+  }
+
+  async function abrirNotificacao(notificacao) {
+    estado.notificacoesAbertas = false;
+    desenharNotificacoes();
+    const { error } = await Api.notificacoes.marcarLida(notificacao.id);
+    if (error) {
+      avisar(error, "erro");
+    } else {
+      estado.notificacoes = estado.notificacoes.filter((item) => item.id !== notificacao.id);
+      estado.notificacoesTotal = Math.max(0, estado.notificacoesTotal - 1);
+      desenharNotificacoes();
+    }
+    if (!notificacao.request_id) return;
+    if (estado.aba !== "solicitacoes") {
+      estado.aba = "solicitacoes";
+      renderAba();
+      carregarSolicitacoes();
+    }
+    abrirFicha(notificacao.request_id);
+  }
+
+  async function marcarTodasNotificacoes() {
+    if (estado.notificacoesMarcando) return;
+    estado.notificacoesMarcando = true;
+    desenharNotificacoes();
+    const { error } = await Api.notificacoes.marcarTodasLidas();
+    estado.notificacoesMarcando = false;
+    if (error) {
+      avisar(error, "erro");
+      desenharNotificacoes();
+      return;
+    }
+    estado.notificacoes = [];
+    estado.notificacoesTotal = 0;
+    estado.notificacoesAbertas = false;
+    desenharNotificacoes();
+    avisar("Notificações revisadas.", "ok");
+  }
+
+  function montarCentralNotificacoes() {
+    const central = elemento("div", { class: "flow-notificacoes" }, [
+      elemento("button", {
+        id: "painel-notificacoes-botao", class: "flow-notificacoes-botao", type: "button",
+        "aria-haspopup": "true", "aria-controls": "painel-notificacoes-menu",
+        onclick: () => {
+          estado.notificacoesAbertas = !estado.notificacoesAbertas;
+          desenharNotificacoes();
+        },
+      }),
+      elemento("div", {
+        id: "painel-notificacoes-menu", class: "flow-notificacoes-menu",
+        role: "region", "aria-label": "Notificações não lidas", hidden: true,
+      }),
+    ]);
+    document.addEventListener("click", (evento) => {
+      if (!estado.notificacoesAbertas || evento.target.closest(".flow-notificacoes")) return;
+      estado.notificacoesAbertas = false;
+      desenharNotificacoes();
+    });
+    document.addEventListener("keydown", (evento) => {
+      if (evento.key !== "Escape" || !estado.notificacoesAbertas) return;
+      estado.notificacoesAbertas = false;
+      desenharNotificacoes();
+      document.getElementById("painel-notificacoes-botao")?.focus();
+    });
+    return central;
+  }
+
   const ABAS = [
     { chave: "solicitacoes", rotulo: "Solicitações" },
     { chave: "lds", rotulo: "Base de LDs", admin: true },
@@ -1040,6 +1214,7 @@
       elemento("main", { class: "flow-main largo" }, [
         elemento("div", { class: "flow-page-head" }, [
           elemento("h1", { text: "Solicitações" }),
+          montarCentralNotificacoes(),
         ]),
         abas,
         elemento("div", { id: "painel-conteudo" }),
@@ -1060,12 +1235,20 @@
     montarPagina();
     const pararNotificacoes = Api.notificacoes.assinar((notificacao) => {
       avisar(texto(notificacao.title) || "Nova solicitação recebida.", "ok");
+      if (!estado.notificacoes.some((item) => item.id === notificacao.id)) {
+        estado.notificacoes.unshift(notificacao);
+        estado.notificacoes = estado.notificacoes.slice(0, 30);
+        estado.notificacoesTotal += 1;
+        estado.notificacoesErro = "";
+        desenharNotificacoes();
+      }
       if (estado.aba === "solicitacoes") {
         carregarSolicitacoes();
         const indicadores = document.getElementById("painel-indicadores");
         if (indicadores) montarIndicadores(indicadores);
       }
     });
+    carregarNotificacoes();
     root.addEventListener("beforeunload", pararNotificacoes, { once: true });
   })();
 })(window);

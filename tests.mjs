@@ -471,6 +471,25 @@ check("toda nova solicitação notifica a equipe ativa em tempo real", () => {
   assert.match(api, /flow-notificacoes-/);
 });
 
+check("o painel mantém uma caixa persistente de notificações não lidas", () => {
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /async contarNaoLidas\(\)/,
+    "o contador não pode depender apenas das 30 notificações exibidas");
+  assert.match(api, /async marcarTodasLidas\(\)/);
+  assert.match(api, /\.eq\("user_id", state\.session\.user\.id\)\.is\("read_at", null\)/,
+    "a consulta deve ser explicitamente limitada ao usuário conectado");
+
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /id: "painel-notificacoes-botao"/);
+  assert.match(painel, /id: "painel-notificacoes-menu"/);
+  assert.match(painel, /abrirNotificacao\(notificacao\)/,
+    "clicar no alerta deve abrir diretamente a solicitação relacionada");
+  assert.match(painel, /Api\.notificacoes\.marcarLida\(notificacao\.id\)/);
+  assert.match(painel, /Api\.notificacoes\.marcarTodasLidas\(\)/);
+  assert.match(painel, /carregarNotificacoes\(\)/,
+    "a caixa precisa recuperar avisos perdidos enquanto a pessoa estava fora do painel");
+});
+
 check("todo tipo de solicitação aceita somente até cinco anexos PDF, Excel e Word de 10 MB", () => {
   const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
   ["pdf", "xls", "xlsx", "xlsm", "doc", "docx"].forEach((extensao) => {
