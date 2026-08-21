@@ -1004,14 +1004,17 @@
     botao.setAttribute("aria-label", total
       ? `Notificações: ${total} não lida${total === 1 ? "" : "s"}`
       : "Notificações: nenhuma não lida");
-    botao.replaceChildren(
+    const conteudoBotao = [
       iconeNotificacao(),
       elemento("span", { text: "Notificações" }),
-      total ? elemento("span", {
+    ];
+    if (total) {
+      conteudoBotao.push(elemento("span", {
         class: "flow-notificacoes-badge", text: total > 99 ? "99+" : String(total),
         "aria-live": "polite",
-      }) : null
-    );
+      }));
+    }
+    botao.replaceChildren(...conteudoBotao);
 
     menu.hidden = !estado.notificacoesAbertas;
     const cabecalho = elemento("div", { class: "flow-notificacoes-cabecalho" }, [
