@@ -1141,7 +1141,9 @@
       }),
     ]);
     document.addEventListener("click", (evento) => {
-      if (!estado.notificacoesAbertas || evento.target.closest(".flow-notificacoes")) return;
+      // composedPath preserva a origem do clique mesmo quando o botão é
+      // redesenhado no próprio evento e o nó original sai do DOM.
+      if (!estado.notificacoesAbertas || evento.composedPath().includes(central)) return;
       estado.notificacoesAbertas = false;
       desenharNotificacoes();
     });
