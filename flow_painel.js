@@ -20,6 +20,7 @@
     ? root.FlowExport.COLUNAS_PAINEL.map((coluna) =>
       coluna.header.charAt(0) + coluna.header.slice(1).toLocaleLowerCase("pt-BR"))
     : ["Protocolo", "Tipo", "Solicitante", "Recebida", "Responsável", "Progresso", "Status", "Prazo"]);
+  const INTERVALO_NOTIFICACOES_MS = 60000;
 
   const estado = {
     aba: "solicitacoes",
@@ -34,6 +35,9 @@
     notificacoesTotal: 0,
     notificacoesAbertas: false,
     notificacoesMarcando: false,
+    notificacoesCarregando: false,
+    notificacaoExcluindoId: "",
+    notificacoesExcluindoTodas: false,
     notificacoesErro: "",
   };
 
@@ -994,6 +998,13 @@
     });
   }
 
+  function iconeExcluirNotificacao() {
+    return elemento("svg", {
+      viewBox: "0 0 24 24", "aria-hidden": "true",
+      html: '<path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"></path>',
+    });
+  }
+
   function desenharNotificacoes() {
     const botao = document.getElementById("painel-notificacoes-botao");
     const menu = document.getElementById("painel-notificacoes-menu");
@@ -1017,19 +1028,34 @@
     botao.replaceChildren(...conteudoBotao);
 
     menu.hidden = !estado.notificacoesAbertas;
+    const bloqueada = estado.notificacoesMarcando || estado.notificacoesExcluindoTodas
+      || Boolean(estado.notificacaoExcluindoId);
+    const acoesCabecalho = [];
+    if (total) {
+      acoesCabecalho.push(elemento("button", {
+        class: "text-button compact", type: "button",
+        text: estado.notificacoesMarcando ? "Confirmando…" : "Marcar lidas",
+        disabled: bloqueada, onclick: marcarTodasNotificacoes,
+      }));
+    }
+    if (estado.notificacoes.length) {
+      acoesCabecalho.push(elemento("button", {
+        class: "text-button compact danger", type: "button",
+        text: estado.notificacoesExcluindoTodas ? "Excluindo…" : "Excluir todas",
+        disabled: bloqueada, onclick: excluirTodasNotificacoes,
+      }));
+    }
+
     const cabecalho = elemento("div", { class: "flow-notificacoes-cabecalho" }, [
       elemento("div", {}, [
         elemento("strong", { text: "Notificações" }),
         elemento("small", { text: total
-          ? `${total} pendente${total === 1 ? "" : "s"} de leitura`
+          ? `${total} não lida${total === 1 ? "" : "s"}`
           : "Tudo revisado" }),
       ]),
-      total ? elemento("button", {
-        class: "text-button compact", type: "button",
-        text: estado.notificacoesMarcando ? "Confirmando…" : "Marcar todas como lidas",
-        disabled: estado.notificacoesMarcando,
-        onclick: marcarTodasNotificacoes,
-      }) : null,
+      acoesCabecalho.length
+        ? elemento("div", { class: "flow-notificacoes-acoes" }, acoesCabecalho)
+        : null,
     ]);
 
     let conteudo;
@@ -1052,18 +1078,31 @@
         estado.notificacoes.map((notificacao) => {
           const titulo = texto(notificacao.title) || "Nova solicitação";
           const corpo = texto(notificacao.body) || "Abra para consultar os detalhes.";
-          return elemento("button", {
-            class: "flow-notificacao-item", type: "button",
-            "aria-label": `${titulo}. ${corpo}. Abrir solicitação`,
-            onclick: () => abrirNotificacao(notificacao),
+          const lida = Boolean(notificacao.read_at);
+          const excluindo = estado.notificacaoExcluindoId === notificacao.id;
+          return elemento("div", {
+            class: `flow-notificacao-item ${lida ? "lida" : "nao-lida"}`,
           }, [
-            elemento("span", { class: "flow-notificacao-item-topo" }, [
-              elemento("strong", { text: titulo }),
-              elemento("time", {
-                datetime: texto(notificacao.created_at), text: dataHora(notificacao.created_at),
-              }),
+            elemento("button", {
+              class: "flow-notificacao-abrir", type: "button",
+              "aria-label": `${titulo}. ${corpo}. ${lida ? "Lida" : "Não lida"}. Abrir solicitação`,
+              disabled: excluindo || estado.notificacoesExcluindoTodas,
+              onclick: () => abrirNotificacao(notificacao),
+            }, [
+              elemento("span", { class: "flow-notificacao-item-topo" }, [
+                elemento("strong", { text: titulo }),
+                elemento("time", {
+                  datetime: texto(notificacao.created_at), text: dataHora(notificacao.created_at),
+                }),
+              ]),
+              elemento("span", { class: "flow-notificacao-item-corpo", text: corpo }),
             ]),
-            elemento("span", { class: "flow-notificacao-item-corpo", text: corpo }),
+            elemento("button", {
+              class: "flow-notificacao-excluir", type: "button",
+              title: "Excluir notificação", "aria-label": `Excluir notificação: ${titulo}`,
+              disabled: excluindo || estado.notificacoesExcluindoTodas,
+              onclick: () => excluirNotificacao(notificacao),
+            }, [iconeExcluirNotificacao()]),
           ]);
         })
       );
@@ -1071,32 +1110,40 @@
     menu.replaceChildren(cabecalho, conteudo);
   }
 
-  async function carregarNotificacoes() {
-    estado.notificacoesErro = "";
-    const [lista, contagem] = await Promise.all([
-      Api.notificacoes.listar(),
-      Api.notificacoes.contarNaoLidas(),
-    ]);
-    if (lista.error || contagem.error) {
-      estado.notificacoesErro = lista.error || contagem.error;
+  async function carregarNotificacoes({ silencioso = false } = {}) {
+    if (estado.notificacoesCarregando) return;
+    estado.notificacoesCarregando = true;
+    if (!silencioso) estado.notificacoesErro = "";
+    try {
+      const [lista, contagem] = await Promise.all([
+        Api.notificacoes.listar(),
+        Api.notificacoes.contarNaoLidas(),
+      ]);
+      if (lista.error || contagem.error) {
+        if (!silencioso) estado.notificacoesErro = lista.error || contagem.error;
+        return;
+      }
+      estado.notificacoesErro = "";
+      estado.notificacoes = lista.data || [];
+      estado.notificacoesTotal = Math.max(0, Number(contagem.data) || 0);
+    } finally {
+      estado.notificacoesCarregando = false;
+      desenharNotificacoes();
     }
-    if (!lista.error) estado.notificacoes = lista.data || [];
-    estado.notificacoesTotal = contagem.error
-      ? estado.notificacoes.length
-      : Math.max(0, Number(contagem.data) || 0);
-    desenharNotificacoes();
   }
 
   async function abrirNotificacao(notificacao) {
     estado.notificacoesAbertas = false;
     desenharNotificacoes();
-    const { error } = await Api.notificacoes.marcarLida(notificacao.id);
-    if (error) {
-      avisar(error, "erro");
-    } else {
-      estado.notificacoes = estado.notificacoes.filter((item) => item.id !== notificacao.id);
-      estado.notificacoesTotal = Math.max(0, estado.notificacoesTotal - 1);
-      desenharNotificacoes();
+    if (!notificacao.read_at) {
+      const { error } = await Api.notificacoes.marcarLida(notificacao.id);
+      if (error) {
+        avisar(error, "erro");
+      } else {
+        notificacao.read_at = new Date().toISOString();
+        estado.notificacoesTotal = Math.max(0, estado.notificacoesTotal - 1);
+        desenharNotificacoes();
+      }
     }
     if (!notificacao.request_id) return;
     if (estado.aba !== "solicitacoes") {
@@ -1118,11 +1165,61 @@
       desenharNotificacoes();
       return;
     }
-    estado.notificacoes = [];
+    const agora = new Date().toISOString();
+    estado.notificacoes.forEach((notificacao) => { notificacao.read_at = notificacao.read_at || agora; });
     estado.notificacoesTotal = 0;
-    estado.notificacoesAbertas = false;
     desenharNotificacoes();
     avisar("Notificações revisadas.", "ok");
+  }
+
+  async function excluirNotificacao(notificacao) {
+    if (estado.notificacaoExcluindoId || estado.notificacoesExcluindoTodas) return;
+    if (!Ui.confirmar("Excluir esta notificação permanentemente?")) return;
+    estado.notificacaoExcluindoId = notificacao.id;
+    desenharNotificacoes();
+    const { error } = await Api.notificacoes.excluir(notificacao.id);
+    estado.notificacaoExcluindoId = "";
+    if (error) {
+      avisar(error, "erro");
+      desenharNotificacoes();
+      return;
+    }
+    estado.notificacoes = estado.notificacoes.filter((item) => item.id !== notificacao.id);
+    if (!notificacao.read_at) estado.notificacoesTotal = Math.max(0, estado.notificacoesTotal - 1);
+    desenharNotificacoes();
+    avisar("Notificação excluída.", "ok");
+  }
+
+  async function excluirTodasNotificacoes() {
+    if (estado.notificacaoExcluindoId || estado.notificacoesExcluindoTodas) return;
+    if (!Ui.confirmar("Excluir permanentemente todas as suas notificações?")) return;
+    estado.notificacoesExcluindoTodas = true;
+    desenharNotificacoes();
+    const { error } = await Api.notificacoes.excluirTodas();
+    estado.notificacoesExcluindoTodas = false;
+    if (error) {
+      avisar(error, "erro");
+      desenharNotificacoes();
+      return;
+    }
+    estado.notificacoes = [];
+    estado.notificacoesTotal = 0;
+    desenharNotificacoes();
+    avisar("Notificações excluídas.", "ok");
+  }
+
+  function instalarAtualizacaoNotificacoes() {
+    const atualizar = () => {
+      if (document.visibilityState === "visible") carregarNotificacoes({ silencioso: true });
+    };
+    const intervalo = root.setInterval(atualizar, INTERVALO_NOTIFICACOES_MS);
+    root.addEventListener("focus", atualizar);
+    document.addEventListener("visibilitychange", atualizar);
+    return () => {
+      root.clearInterval(intervalo);
+      root.removeEventListener("focus", atualizar);
+      document.removeEventListener("visibilitychange", atualizar);
+    };
   }
 
   function montarCentralNotificacoes() {
@@ -1242,7 +1339,7 @@
       avisar(texto(notificacao.title) || "Nova solicitação recebida.", "ok");
       if (!estado.notificacoes.some((item) => item.id === notificacao.id)) {
         estado.notificacoes.unshift(notificacao);
-        estado.notificacoes = estado.notificacoes.slice(0, 30);
+        estado.notificacoes = estado.notificacoes.slice(0, 50);
         estado.notificacoesTotal += 1;
         estado.notificacoesErro = "";
         desenharNotificacoes();
@@ -1254,6 +1351,10 @@
       }
     });
     carregarNotificacoes();
-    root.addEventListener("beforeunload", pararNotificacoes, { once: true });
+    const pararAtualizacaoNotificacoes = instalarAtualizacaoNotificacoes();
+    root.addEventListener("beforeunload", () => {
+      pararNotificacoes();
+      pararAtualizacaoNotificacoes();
+    }, { once: true });
   })();
 })(window);

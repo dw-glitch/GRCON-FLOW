@@ -27,6 +27,7 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_17_request_attachments` | Completa os formatos de anexos do solicitante e mantém o bucket privado em 25 MB |
 | `flow_18_secure_request_deletion` | Exclusão permanente por administrador/proprietário, com anexos removidos pelo Storage API |
 | `flow_19_attachment_guardrails` | Limita anexos a 10 MB e cinco arquivos, fecha os formatos e expõe o consumo do Storage à equipe |
+| `flow_20_notification_inbox_controls` | Restringe a caixa ao destinatário e permite exclusão individual ou em massa das próprias notificações |
 
 ## Tabelas
 

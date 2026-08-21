@@ -474,8 +474,14 @@ check("toda nova solicitação notifica a equipe ativa em tempo real", () => {
 check("o painel mantém uma caixa persistente de notificações não lidas", () => {
   const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
   assert.match(api, /async contarNaoLidas\(\)/,
-    "o contador não pode depender apenas das 30 notificações exibidas");
+    "o contador não pode depender apenas das notificações exibidas");
   assert.match(api, /async marcarTodasLidas\(\)/);
+  assert.match(api, /async excluir\(id\)/);
+  assert.match(api, /async excluirTodas\(\)/);
+  assert.match(api, /flow_notifications"\)\.delete\(\)/,
+    "a exclusão deve passar pelo cliente autenticado e pela RLS");
+  assert.match(api, /limit\(50\)/,
+    "a caixa deve manter também o histórico recente já lido");
   assert.match(api, /\.eq\("user_id", state\.session\.user\.id\)\.is\("read_at", null\)/,
     "a consulta deve ser explicitamente limitada ao usuário conectado");
 
@@ -486,10 +492,26 @@ check("o painel mantém uma caixa persistente de notificações não lidas", () 
     "clicar no alerta deve abrir diretamente a solicitação relacionada");
   assert.match(painel, /Api\.notificacoes\.marcarLida\(notificacao\.id\)/);
   assert.match(painel, /Api\.notificacoes\.marcarTodasLidas\(\)/);
+  assert.match(painel, /Api\.notificacoes\.excluir\(notificacao\.id\)/);
+  assert.match(painel, /Api\.notificacoes\.excluirTodas\(\)/);
+  assert.match(painel, /INTERVALO_NOTIFICACOES_MS = 60000/,
+    "o tempo real precisa de uma conferência leve como contingência");
+  assert.match(painel, /estado\.notificacoes\.slice\(0, 50\)/,
+    "o tempo real deve conservar o mesmo limite do histórico carregado");
+  assert.match(painel, /visibilitychange/,
+    "ao voltar para o painel, as notificações devem ser conferidas sem recarregar a página");
   assert.match(painel, /carregarNotificacoes\(\)/,
     "a caixa precisa recuperar avisos perdidos enquanto a pessoa estava fora do painel");
   assert.match(painel, /evento\.composedPath\(\)\.includes\(central\)/,
     "redesenhar o conteúdo do botão não pode fechar a caixa no mesmo clique");
+
+  const migration = fs.readFileSync(path.join(root, "database/migrations/flow_20_notification_inbox_controls.sql"), "utf8");
+  assert.match(migration, /for delete\s+to authenticated\s+using \(\(select auth\.uid\(\)\) = user_id\)/i,
+    "cada destinatário só pode excluir as próprias notificações");
+  assert.match(migration, /revoke all privileges[^\n]+from anon/i);
+  assert.match(migration, /grant select, update, delete[^\n]+to authenticated/i);
+  assert.doesNotMatch(migration, /grant insert[^\n]+to authenticated/i,
+    "avisos continuam sendo criados apenas pelo gatilho do banco");
 });
 
 check("todo tipo de solicitação aceita somente até cinco anexos PDF, Excel e Word de 10 MB", () => {

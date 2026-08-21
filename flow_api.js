@@ -759,8 +759,8 @@
       if (!state.session) return { data: [], error: null };
       return chamar(
         client.from("flow_notifications").select("*")
-          .eq("user_id", state.session.user.id).is("read_at", null)
-          .order("created_at", { ascending: false }).limit(30),
+          .eq("user_id", state.session.user.id)
+          .order("created_at", { ascending: false }).limit(50),
         "listar notificações"
       );
     },
@@ -790,6 +790,21 @@
         client.from("flow_notifications").update({ read_at: new Date().toISOString() })
           .eq("user_id", state.session.user.id).is("read_at", null),
         "marcar todas as notificações"
+      );
+    },
+    async excluir(id) {
+      if (!state.session) return { data: null, error: "Entre novamente para continuar." };
+      return chamar(
+        client.from("flow_notifications").delete()
+          .eq("id", id).eq("user_id", state.session.user.id),
+        "excluir notificação"
+      );
+    },
+    async excluirTodas() {
+      if (!state.session) return { data: null, error: "Entre novamente para continuar." };
+      return chamar(
+        client.from("flow_notifications").delete().eq("user_id", state.session.user.id),
+        "excluir todas as notificações"
       );
     },
     assinar(fn) {
