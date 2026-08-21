@@ -471,27 +471,51 @@ check("toda nova solicitação notifica a equipe ativa em tempo real", () => {
   assert.match(api, /flow-notificacoes-/);
 });
 
-check("todo tipo de solicitação aceita anexos PDF, Excel e Word", () => {
+check("todo tipo de solicitação aceita somente até cinco anexos PDF, Excel e Word de 10 MB", () => {
   const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
   ["pdf", "xls", "xlsx", "xlsm", "doc", "docx"].forEach((extensao) => {
     assert.match(api, new RegExp(`EXTENSOES_ANEXO[^\\n]+[\"']${extensao}[\"']`),
       `falta suporte a .${extensao}`);
   });
   assert.match(api, /validarAnexo\(arquivo\)/, "a API precisa validar antes do upload");
+  assert.match(api, /MAXIMO_ANEXOS[^\n]+5/);
+  assert.match(api, /config\.uploadMaxMb \|\| 10/);
+  assert.match(api, /client\.rpc\("flow_register_attachment"/,
+    "o navegador não deve inserir metadados sem as validações atômicas do banco");
   assert.match(api, /remove\(\[caminho\]\)/, "falha no registro não pode deixar arquivo órfão");
 
   const solicitar = fs.readFileSync(path.join(root, "flow_solicitar.js"), "utf8");
   assert.match(solicitar, /blocos\.push\(montarAnexos\(\)\)/,
     "anexos precisam aparecer mesmo em tipos que não usam documentos");
   assert.match(solicitar, /accept: Api\.anexos\.accept/);
+  assert.match(solicitar, /estado\.anexos\.length \+ aceitos\.length >= maximo/,
+    "a seleção precisa parar no quinto arquivo");
   assert.match(solicitar, /Tentar anexos novamente/,
     "uma falha precisa ser visível e permitir nova tentativa");
   assert.doesNotMatch(solicitar, /anexo não enviado[^\n]+console\.warn/,
     "falha de anexo não pode ficar somente no console");
-  const migration = fs.readFileSync(path.join(root, "database/migrations/flow_17_request_attachments.sql"), "utf8");
+  const migration = fs.readFileSync(path.join(root, "database/migrations/flow_19_attachment_guardrails.sql"), "utf8");
   assert.match(migration, /public = false/);
-  assert.match(migration, /file_size_limit = 26214400/);
+  assert.match(migration, /file_size_limit = 10485760/);
   assert.match(migration, /macroenabled\.12/i, "o bucket precisa aceitar Excel com macro");
+  assert.match(migration, /Limite de 5 anexos por solicitação atingido/);
+  assert.match(migration, /for update/i, "uploads simultâneos precisam ser serializados por solicitação");
+  assert.match(migration, /revoke insert, update, delete/i,
+    "metadados não podem contornar o RPC validado");
+  assert.doesNotMatch(migration, /delete\s+from\s+storage\.objects/i,
+    "objetos do Storage nunca devem ser apagados diretamente por SQL");
+});
+
+check("o painel mostra o consumo total e o peso dos anexos", () => {
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  const migration = fs.readFileSync(path.join(root, "database/migrations/flow_19_attachment_guardrails.sql"), "utf8");
+  assert.match(api, /client\.rpc\("flow_storage_usage"\)/);
+  assert.match(painel, /id: "painel-armazenamento"/);
+  assert.match(painel, /Anexos:/);
+  assert.match(painel, /role: "progressbar"/);
+  assert.match(migration, /auth\.uid\(\) is null or not public\.flow_is_staff\(\)/i);
+  assert.match(migration, /grant execute on function public\.flow_storage_usage\(\) to authenticated/i);
 });
 
 check("o painel baixa o anexo privado mantendo o nome original", () => {
@@ -511,6 +535,8 @@ check("a exclusão remove anexos antes da solicitação e fica restrita a admini
   const remocaoBanco = api.indexOf('client.rpc("flow_delete_request"');
   assert.ok(remocaoStorage > -1, "os objetos precisam ser removidos pelo Storage API");
   assert.ok(remocaoBanco > remocaoStorage, "o banco só deve ser apagado depois dos objetos");
+  assert.match(api, /client\.storage\.from\("flow-anexos"\)\.list\(pasta/,
+    "a exclusão precisa descobrir e remover também um eventual objeto sem metadados");
   assert.match(api, /if \(!auth\.ehAdmin\(\)\)/, "a interface de dados precisa bloquear operador e solicitante");
 
   const migration = fs.readFileSync(path.join(root, "database/migrations/flow_18_secure_request_deletion.sql"), "utf8");

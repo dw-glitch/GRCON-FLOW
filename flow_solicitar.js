@@ -202,21 +202,29 @@
 
   /** Anexos são independentes dos códigos e ficam disponíveis em todo pedido. */
   function montarAnexos() {
+    const maximo = Api.anexos.maximo || 5;
+    const limiteAtingido = estado.anexos.length >= maximo;
     const entradaArquivos = elemento("input", {
       type: "file", multiple: true, hidden: true, id: "sol-arquivos",
-      accept: Api.anexos.accept,
+      accept: Api.anexos.accept, disabled: limiteAtingido || null,
     });
     const area = elemento("div", {
-      class: "flow-drop", tabindex: "0", role: "button",
+      class: `flow-drop ${limiteAtingido ? "cheio" : ""}`, tabindex: limiteAtingido ? "-1" : "0", role: "button",
+      "aria-disabled": limiteAtingido ? "true" : "false",
       "aria-label": "Escolher ou arrastar anexos em PDF, Excel ou Word",
-      onclick: () => entradaArquivos.click(),
+      onclick: () => {
+        if (limiteAtingido) { avisar(`O limite é de ${maximo} anexos por solicitação.`); return; }
+        entradaArquivos.click();
+      },
       onkeydown: (evento) => {
-        if (evento.key === "Enter" || evento.key === " ") { evento.preventDefault(); entradaArquivos.click(); }
+        if (!limiteAtingido && (evento.key === "Enter" || evento.key === " ")) {
+          evento.preventDefault(); entradaArquivos.click();
+        }
       },
     }, [
       icone("upload"),
-      elemento("strong", { text: "Arraste os anexos aqui" }),
-      elemento("span", { text: `PDF, Excel ou Word · até ${Api.config.uploadMaxMb || 25} MB por arquivo.` }),
+      elemento("strong", { text: limiteAtingido ? "Limite de anexos atingido" : "Arraste os anexos aqui" }),
+      elemento("span", { text: `PDF, Excel ou Word · até ${maximo} arquivos · ${Api.config.uploadMaxMb || 10} MB cada.` }),
       entradaArquivos,
     ]);
 
@@ -252,7 +260,7 @@
     return elemento("section", { class: "flow-card" }, [
       elemento("div", { class: "flow-card-head" }, [
         elemento("h3", { text: "Anexos" }),
-        elemento("p", { text: "PDF, Excel ou Word." }),
+        elemento("p", { text: `${estado.anexos.length} de ${maximo} arquivos selecionados.` }),
       ]),
       area,
       estado.anexos.length ? lista : null,
@@ -262,6 +270,7 @@
   function receberArquivos(arquivos) {
     const lista = Array.from(arquivos || []);
     if (!lista.length) return;
+    const maximo = Api.anexos.maximo || 5;
     const existentes = new Set(estado.anexos.map((arquivo) =>
       `${arquivo.name}\u0000${arquivo.size}\u0000${arquivo.lastModified || 0}`));
     const aceitos = [];
@@ -271,6 +280,9 @@
       const chave = `${arquivo.name}\u0000${arquivo.size}\u0000${arquivo.lastModified || 0}`;
       if (erro) erros.push(erro);
       else if (existentes.has(chave)) erros.push(`“${arquivo.name}” já foi anexado.`);
+      else if (estado.anexos.length + aceitos.length >= maximo) {
+        erros.push(`O limite é de ${maximo} anexos por solicitação; “${arquivo.name}” não foi incluído.`);
+      }
       else { existentes.add(chave); aceitos.push(arquivo); }
     });
     if (erros.length) avisar(erros.join(" "), "erro");
