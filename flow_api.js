@@ -32,15 +32,28 @@
   // informam o MIME de arquivos do Office (ou informam application/octet-stream).
   const EXTENSOES_ANEXO = Object.freeze(["pdf", "xls", "xlsx", "xlsm", "doc", "docx"]);
   const ACEITE_ANEXO = EXTENSOES_ANEXO.map((extensao) => `.${extensao}`).join(",");
+  const MAXIMO_ANEXOS = Math.min(5, Math.max(1, Number(config.uploadMaxFiles) || 5));
+  const MIME_ANEXO = Object.freeze({
+    pdf: "application/pdf",
+    xls: "application/vnd.ms-excel",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    xlsm: "application/vnd.ms-excel.sheet.macroenabled.12",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  });
+
+  function extensaoDoAnexo(arquivo) {
+    return texto(arquivo && arquivo.name).toLowerCase().split(".").pop();
+  }
 
   function validarAnexo(arquivo) {
     if (!arquivo || !texto(arquivo.name)) return "Escolha um arquivo válido.";
-    const extensao = texto(arquivo.name).toLowerCase().split(".").pop();
+    const extensao = extensaoDoAnexo(arquivo);
     if (!EXTENSOES_ANEXO.includes(extensao)) {
       return `“${arquivo.name}” não é PDF, Excel ou Word.`;
     }
     if (!Number(arquivo.size)) return `“${arquivo.name}” está vazio.`;
-    const limiteMb = config.uploadMaxMb || 25;
+    const limiteMb = config.uploadMaxMb || 10;
     if (arquivo.size > limiteMb * 1024 * 1024) {
       return `“${arquivo.name}” tem mais de ${limiteMb} MB.`;
     }
@@ -60,6 +73,13 @@
     if (/Email not confirmed/i.test(bruto)) return "Confirme seu e-mail antes de entrar.";
     if (/User already registered/i.test(bruto)) return "Este e-mail já tem cadastro. Faça login.";
     if (/Password should be at least/i.test(bruto)) return "A senha precisa ter pelo menos 6 caracteres.";
+    if (/Limite de 5 anexos/i.test(bruto)) return "Esta solicitação já tem o limite de 5 anexos.";
+    if (/flow_attachments_(extension|mime)_valid|mime type|formato de anexo/i.test(bruto)) {
+      return "Envie somente arquivos PDF, Word ou Excel.";
+    }
+    if (/flow_attachments_size_valid|maximum allowed size|mais de 10 MB/i.test(bruto)) {
+      return "Cada anexo pode ter no máximo 10 MB.";
+    }
     if (/row-level security|permission denied|Sem permissão/i.test(bruto)) {
       return bruto.includes("Sem permissão") ? bruto : "Seu perfil não tem permissão para esta ação.";
     }
@@ -333,7 +353,19 @@
      */
     async excluir(id, anexos = []) {
       if (!auth.ehAdmin()) return { data: null, error: "Seu perfil não tem permissão para excluir solicitações." };
-      const caminhos = [...new Set((anexos || []).map((anexo) => texto(anexo.storage_path)).filter(Boolean))];
+      const pasta = texto(id);
+      const listagem = await chamar(
+        client.storage.from("flow-anexos").list(pasta, { limit: 100 }),
+        "conferir anexos da solicitação"
+      );
+      if (listagem.error) return listagem;
+      const encontrados = (listagem.data || [])
+        .filter((objeto) => objeto && objeto.id && texto(objeto.name))
+        .map((objeto) => `${pasta}/${objeto.name}`);
+      const caminhos = [...new Set([
+        ...(anexos || []).map((anexo) => texto(anexo.storage_path)).filter(Boolean),
+        ...encontrados,
+      ])];
       if (caminhos.length) {
         const remocao = await chamar(
           client.storage.from("flow-anexos").remove(caminhos),
@@ -654,27 +686,33 @@
   const anexos = {
     extensoes: EXTENSOES_ANEXO,
     accept: ACEITE_ANEXO,
+    maximo: MAXIMO_ANEXOS,
     validar: validarAnexo,
 
     async enviar(requestId, arquivo, itemId = null) {
       const erroArquivo = validarAnexo(arquivo);
       if (erroArquivo) return { data: null, error: erroArquivo };
       const nomeSeguro = arquivo.name.replace(/[^\w.\- ]+/g, "_");
-      const caminho = `${requestId}/${Date.now()}-${nomeSeguro}`;
+      const identificador = root.crypto && typeof root.crypto.randomUUID === "function"
+        ? root.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const caminho = `${requestId}/${identificador}-${nomeSeguro}`;
+      const mimeType = MIME_ANEXO[extensaoDoAnexo(arquivo)];
       const { error } = await chamar(
-        client.storage.from("flow-anexos").upload(caminho, arquivo),
+        client.storage.from("flow-anexos").upload(caminho, arquivo, {
+          contentType: mimeType,
+          upsert: false,
+        }),
         "enviar anexo"
       );
       if (error) return { error };
       const registro = await chamar(
-        client.from("flow_attachments").insert({
-          request_id: requestId,
-          item_id: itemId,
-          file_name: arquivo.name,
-          storage_path: caminho,
-          mime_type: arquivo.type || "",
-          size_bytes: arquivo.size,
-          uploaded_by: state.session ? state.session.user.id : null,
+        client.rpc("flow_register_attachment", {
+          p_request_id: requestId,
+          p_item_id: itemId,
+          p_file_name: arquivo.name,
+          p_storage_path: caminho,
+          p_mime_type: mimeType,
+          p_size_bytes: arquivo.size,
         }),
         "registrar anexo"
       );
@@ -697,6 +735,12 @@
         "preparar download do anexo"
       );
       return { data: data ? data.signedUrl : null, error };
+    },
+  };
+
+  const armazenamento = {
+    async resumo() {
+      return chamar(client.rpc("flow_storage_usage"), "consultar armazenamento");
     },
   };
 
@@ -831,6 +875,6 @@
 
   root.FlowApi = Object.freeze({
     client, config, auth, tipos, solicitacoes, itens, triagem, lds, normas,
-    comentarios, anexos, historico, notificacoes, usuarios, acesso, exportacao,
+    comentarios, anexos, armazenamento, historico, notificacoes, usuarios, acesso, exportacao,
   });
 })(window);

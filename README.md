@@ -277,7 +277,9 @@ Opcionais — o `npm run build` já aponta para o projeto Supabase do GRCON Flow
 | --- | --- |
 | `FLOW_SUPABASE_URL` | Apontar para outro projeto (homologação, por exemplo). |
 | `FLOW_SUPABASE_ANON_KEY` | A chave **publicável** do projeto. |
-| `FLOW_UPLOAD_MAX_MB` | Tamanho máximo de anexo (padrão 25). |
+| `FLOW_UPLOAD_MAX_MB` | Tamanho máximo de cada anexo (padrão 10). |
+| `FLOW_UPLOAD_MAX_FILES` | Quantidade máxima de anexos por solicitação (padrão 5; o banco também limita em 5). |
+| `FLOW_STORAGE_QUOTA_MB` | Cota usada pela barra do painel (padrão 1024 MB no plano Free). |
 | `FLOW_LD_UPLOAD_MAX_MB` | Tamanho máximo do arquivo de LD (padrão 100). |
 
 A URL e a chave publicável são feitas para viajar no navegador; o que protege os

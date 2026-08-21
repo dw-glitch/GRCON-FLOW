@@ -26,6 +26,7 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_16_norm_sources_and_files` | Corrige metadados, separa os anexos A–G da N-1710 e permite anexar PDFs às revisões iniciais |
 | `flow_17_request_attachments` | Completa os formatos de anexos do solicitante e mantém o bucket privado em 25 MB |
 | `flow_18_secure_request_deletion` | Exclusão permanente por administrador/proprietário, com anexos removidos pelo Storage API |
+| `flow_19_attachment_guardrails` | Limita anexos a 10 MB e cinco arquivos, fecha os formatos e expõe o consumo do Storage à equipe |
 
 ## Tabelas
 
@@ -89,6 +90,8 @@ se alcança nem a lista de tipos.
 | `flow_activate_ld_version(versao)` | Ativa a revisão e inativa a anterior. |
 | `flow_update_items(...)` / `flow_update_request(...)` | Alterações do painel, com histórico. |
 | `flow_delete_request(id)` | Exclui permanentemente uma solicitação; somente administrador ou proprietário. |
+| `flow_register_attachment(...)` | Registra um anexo validado e impede mais de cinco arquivos por solicitação. |
+| `flow_storage_usage()` | Resume o uso total do Storage e dos anexos; somente para a equipe. |
 | `flow_track_protocol(protocolo)` | Acompanhamento — devolve só o que o solicitante pode ver. |
 | `flow_set_user_role(user, papel)` | Troca de papel, com as regras de quem pode; espelha na lista de acesso. |
 | `flow_acesso_para(email)` | A regra de quem entra e com que papel. Uso interno. |
@@ -132,11 +135,11 @@ prontas e faz o que sabe fazer melhor — acesso por índice.
 
 | Bucket | Conteúdo | Limite |
 | --- | --- | --- |
-| `flow-anexos` | Anexos das solicitações. Caminho começa pelo id da solicitação. | 25 MB |
+| `flow-anexos` | PDF, Word e Excel das solicitações. Caminho começa pelo id da solicitação. | 10 MB por arquivo · até 5 por solicitação |
 | `flow-lds` | Arquivos originais das LDs. Área interna. | 100 MB |
 | `flow-normas` | PDFs controlados das revisões normativas. Área interna. | 50 MB |
 
-Ambos privados, com políticas que conferem quem pode ler e escrever.
+Todos privados, com políticas que conferem quem pode ler e escrever.
 
 ## Recriar em outro projeto
 

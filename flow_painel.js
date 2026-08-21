@@ -39,6 +39,18 @@
     return `${(tamanho / (1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
   }
 
+  function tamanhoArmazenamento(bytes) {
+    const tamanho = Math.max(0, Number(bytes) || 0);
+    if (tamanho < 1024) return `${tamanho.toLocaleString("pt-BR")} B`;
+    if (tamanho < 1024 * 1024) {
+      return `${(tamanho / 1024).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} KB`;
+    }
+    if (tamanho < 1024 * 1024 * 1024) {
+      return `${(tamanho / (1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
+    }
+    return `${(tamanho / (1024 * 1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} GB`;
+  }
+
   // ---------------------------------------------------------------------------
   // Colunas dos itens — é aqui que o painel muda conforme o pedido
   // ---------------------------------------------------------------------------
@@ -107,6 +119,48 @@
       elemento("strong", { text: String(numeros[indicador.chave] ?? 0) }),
       elemento("span", { text: indicador.rotulo }),
     ])));
+  }
+
+  async function montarArmazenamento(destino) {
+    if (!destino) return;
+    destino.className = "flow-armazenamento carregando";
+    destino.replaceChildren(elemento("span", { text: "Consultando armazenamento…" }));
+    const { data, error } = await Api.armazenamento.resumo();
+    if (error) {
+      destino.className = "flow-armazenamento indisponivel";
+      destino.replaceChildren(
+        elemento("strong", { text: "Armazenamento" }),
+        elemento("span", { text: "Não foi possível consultar agora." })
+      );
+      return;
+    }
+
+    const resumo = Array.isArray(data) ? data[0] : data;
+    const usados = Number(resumo && resumo.total_bytes) || 0;
+    const anexosBytes = Number(resumo && resumo.attachment_bytes) || 0;
+    const anexosArquivos = Number(resumo && resumo.attachment_files) || 0;
+    const cota = (Number(Api.config.storageQuotaMb) || 1024) * 1024 * 1024;
+    const percentualReal = cota ? (usados / cota) * 100 : 0;
+    const percentual = Math.min(100, Math.max(0, percentualReal));
+    const classe = percentualReal >= 85 ? "critico" : percentualReal >= 70 ? "atencao" : "ok";
+
+    destino.className = `flow-armazenamento ${classe}`;
+    destino.replaceChildren(
+      elemento("div", { class: "flow-armazenamento-texto" }, [
+        elemento("span", { text: "Armazenamento" }),
+        elemento("strong", { text: `${tamanhoArmazenamento(usados)} de ${tamanhoArmazenamento(cota)}` }),
+      ]),
+      elemento("div", {
+        class: "flow-armazenamento-barra", role: "progressbar",
+        "aria-label": "Espaço de armazenamento utilizado",
+        "aria-valuemin": "0", "aria-valuemax": "100",
+        "aria-valuenow": String(Math.round(percentual)),
+      }, [elemento("i", { style: `width:${percentual}%` })]),
+      elemento("span", {
+        class: "flow-armazenamento-detalhe",
+        text: `Anexos: ${anexosArquivos.toLocaleString("pt-BR")} arquivo(s) · ${tamanhoArmazenamento(anexosBytes)}`,
+      })
+    );
   }
 
   function aplicarIndicador(indicador) {
@@ -426,6 +480,7 @@
       await carregarSolicitacoes();
       const indicadores = document.getElementById("painel-indicadores");
       if (indicadores) montarIndicadores(indicadores);
+      montarArmazenamento(document.getElementById("painel-armazenamento"));
     };
 
     return elemento("section", { class: "flow-card" }, [
@@ -941,11 +996,13 @@
     if (estado.aba === "solicitacoes") {
       conteudo.replaceChildren(
         elemento("div", { id: "painel-indicadores", class: "flow-indicadores" }),
+        elemento("div", { id: "painel-armazenamento", class: "flow-armazenamento carregando" }),
         montarFiltros(),
         montarLote(),
         elemento("div", { id: "painel-tabela" })
       );
       montarIndicadores(document.getElementById("painel-indicadores"));
+      montarArmazenamento(document.getElementById("painel-armazenamento"));
       desenharTabela();
     } else if (estado.aba === "lds") {
       root.FlowLd.montar(conteudo);
