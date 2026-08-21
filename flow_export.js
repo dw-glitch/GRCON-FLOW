@@ -45,6 +45,16 @@
     TRIAGEM_NAO_APLICAVEL: "Triagem não aplicável",
   });
 
+  const ETAPA_LEGIVEL = Object.freeze({
+    pendente: "Pendente", em_andamento: "Em andamento",
+    concluido: "Concluída", nao_aplicavel: "Não aplicável",
+  });
+
+  const ACAO_LEGIVEL = Object.freeze({
+    IDENTIFICAR_CODIGO: "Identificar código", INCLUIR_LD: "Incluir na LD",
+    ALOCAR: "Alocar documento", POSTAR_SIGEM: "Postar no SIGEM", CONCLUIDO: "Concluído",
+  });
+
   // Mesmos oito títulos exibidos na tabela do painel. Esta lista é exportada
   // também para os testes, impedindo que tela e planilha se afastem em silêncio.
   const COLUNAS_PAINEL = Object.freeze([
@@ -73,6 +83,11 @@
     { header: "ALOCAÇÃO", key: "allocation", width: 25, value: (r) => texto(r.allocation) },
     { header: "SITUAÇÃO DA ALOCAÇÃO", key: "allocation_status", width: 23, value: (r) => texto(r.allocation_status) },
     { header: "STATUS NO SIGEM", key: "sigem_status", width: 21, value: (r) => texto(r.sigem_status) },
+    { header: "PRÓXIMA AÇÃO", key: "internal_next_action", width: 22, value: (r) => ACAO_LEGIVEL[r.internal_next_action] || texto(r.internal_next_action) },
+    { header: "ETAPA · CÓDIGO", key: "code_stage", width: 18, value: (r) => ETAPA_LEGIVEL[r.code_stage] || texto(r.code_stage) },
+    { header: "ETAPA · LD", key: "ld_stage", width: 18, value: (r) => ETAPA_LEGIVEL[r.ld_stage] || texto(r.ld_stage) },
+    { header: "ETAPA · ALOCAÇÃO", key: "allocation_stage", width: 20, value: (r) => ETAPA_LEGIVEL[r.allocation_stage] || texto(r.allocation_stage) },
+    { header: "ETAPA · SIGEM", key: "sigem_stage", width: 18, value: (r) => ETAPA_LEGIVEL[r.sigem_stage] || texto(r.sigem_stage) },
     { header: "REVISÃO", key: "revision", width: 11, value: (r) => texto(r.revision) },
     { header: "ÚLTIMA GRDT", key: "last_grdt", width: 22, value: (r) => texto(r.last_grdt) },
     { header: "LD CONSIDERADA", key: "ld_name", width: 19, value: (r) => texto(r.ld_name) },
@@ -138,9 +153,13 @@
         ? `Sem código informado. Título indicado: ${texto(registro.requested_title)}.`
         : "",
       texto(registro.triage_rule),
+      texto(registro.internal_next_action) ? `Próxima ação interna: ${ACAO_LEGIVEL[registro.internal_next_action] || texto(registro.internal_next_action)}.` : "",
       texto(registro.item_answer) ? `Resposta: ${texto(registro.item_answer)}` : "",
     ].filter(Boolean).join(" ");
-    const inclusao = registro.classification === "NAO_LOCALIZADO" ? "sim"
+    const inclusao = registro.ld_stage === "concluido" ? "não"
+      : registro.ld_stage === "nao_aplicavel" ? "não"
+      : registro.ld_stage ? "sim"
+      : registro.classification === "NAO_LOCALIZADO" ? "sim"
       : ["PRONTO", "ACAO_NECESSARIA", "VALIDAR"].includes(registro.classification) ? "não"
       : "";
 
@@ -152,7 +171,7 @@
       documentPath: "", needsLdInclusion: inclusao, ldVersion: texto(registro.ld_version_label), ldApprovedAt: "",
       allocation: texto(registro.allocation), reference: texto(registro.ld_name), allocSentAt: "",
       fiscal1ReturnedAt: "", fiscal1Answer: "", fiscal2ReturnedAt: "", sigemOwner: "",
-      sigemStatus: texto(registro.sigem_status), sigemSubmittedAt: "", observations: observacoes,
+      sigemStatus: texto(registro.sigem_status) || (ETAPA_LEGIVEL[registro.sigem_stage] || texto(registro.sigem_stage)), sigemSubmittedAt: "", observations: observacoes,
       pwN1710: "", overallStatus: STATUS_LEGIVEL[registro.request_status] || texto(registro.request_status),
       statusDate: dataBR(registro.item_updated_at),
     };

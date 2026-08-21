@@ -22,9 +22,11 @@ Solicitante → escolhe o serviço → formulário se adapta → envia
      ↓
 Solicitação REGISTRADA SEMPRE + protocolo FLOW-AAAA-NNNNNN
      ↓
-Triagem automática (quando o tipo usa LD e há código)
+Triagem automática (por código ou por título, quando possível)
      ↓
 Painel operacional, com colunas do tipo do pedido
+     ↓
+Postagem no SIGEM: identificar código → incluir na LD → alocar → postar
      ↓
 Responsável → execução → validação → conclusão
      ↓
@@ -71,7 +73,7 @@ a divergência é mostrada para alguém decidir.
 versão de LD que usou. A análise anterior permanece.
 
 **Anexos ficam privados.** Todo tipo de solicitação aceita vários arquivos PDF,
-Excel (`.xls`, `.xlsx`, `.xlsm`) e Word (`.doc`, `.docx`), com até 25 MB por
+Excel (`.xls`, `.xlsx`, `.xlsm`) e Word (`.doc`, `.docx`), com até 10 MB por
 arquivo. O solicitante vê o resultado de cada envio e pode tentar novamente se
 algum falhar. A equipe baixa o arquivo original na ficha da solicitação por um
 link temporário; o bucket não é público.
@@ -93,8 +95,9 @@ então apaga a solicitação, seus itens, triagens, histórico e comentários.
 | `POSSIVEIS_CORRESPONDENCIAS` | Candidatos encontrados pelo título. |
 | `TRIAGEM_NAO_APLICAVEL` | O tipo não depende de consulta documental. |
 
-Para tipos como "Inclusão na LD", não achar o documento é o esperado — o painel
-mostra isso em tom neutro, não como alerta.
+Na **Postagem no SIGEM**, o solicitante não precisa conhecer as etapas internas.
+Ele informa um ou vários títulos e, quando souber, os códigos. O painel decide a
+próxima ação de cada item: identificar código, incluir na LD, alocar ou postar.
 
 ---
 
@@ -115,9 +118,11 @@ Cada tipo controla:
 - `panel_columns` — o que o painel destaca para este tipo;
 - `workflow` — os status por onde o pedido passa.
 
-Já vêm cadastrados 11 tipos, entre eles Postagem no SIGEM, Alocação, Inclusão
-na LD, Alteração de título, Correção de alocação, Impressão, **Localizar código
-pelo título** e **Consulta / Solicitação de informação**.
+A **Postagem no SIGEM** é o serviço único para o fluxo de inclusão/alocação/postagem:
+"Alocação", "Inclusão na LD" e "Inclusão na LD + Alocação" permanecem no histórico
+do banco, porém inativos para novos pedidos. Outros serviços específicos, como
+Alteração de título, Correção de alocação, Impressão, **Localizar código pelo
+título** e **Consulta / Solicitação de informação**, continuam disponíveis.
 
 ---
 
@@ -272,6 +277,9 @@ não há dependência de CDN em runtime.
 ### Variáveis de ambiente
 
 Opcionais — o `npm run build` já aponta para o projeto Supabase do GRCON Flow.
+Variáveis genéricas `SUPABASE_URL`/`SUPABASE_ANON_KEY` não são lidas: somente
+variáveis prefixadas com `FLOW_` podem trocar o projeto, evitando herança acidental
+da configuração do GRCON principal na hospedagem.
 
 | Variável | Para quê |
 | --- | --- |

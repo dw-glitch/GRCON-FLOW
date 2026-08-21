@@ -63,6 +63,15 @@
   // ---------------------------------------------------------------------------
   // Colunas dos itens — é aqui que o painel muda conforme o pedido
   // ---------------------------------------------------------------------------
+  const ETAPAS_INTERNAS = Object.freeze({
+    pendente: "Pendente", em_andamento: "Em andamento", concluido: "Concluído", nao_aplicavel: "Não aplicável",
+  });
+  const PROXIMAS_ACOES = Object.freeze({
+    IDENTIFICAR_CODIGO: "Identificar código", INCLUIR_LD: "Incluir na LD", ALOCAR: "Fazer alocação",
+    POSTAR_SIGEM: "Postar no SIGEM", CONCLUIDO: "Concluído",
+  });
+  const etapaInterna = (valor) => elemento("span", { class: `flow-selo ${valor === "concluido" ? "ok" : valor === "em_andamento" ? "validar" : "acao"}`, text: ETAPAS_INTERNAS[valor] || texto(valor) || "—" });
+
   const COLUNAS = {
     document: {
       rotulo: "Documento",
@@ -90,6 +99,11 @@
     discipline: { rotulo: "Disciplina", celula: (item) => elemento("span", { text: texto(item.discipline) || "—" }) },
     last_grdt: { rotulo: "Última GRDT", celula: (item) => elemento("span", { text: texto(item.last_grdt) || "—" }) },
     answer: { rotulo: "Resposta", celula: (item) => elemento("span", { text: texto(item.answer) || "—" }) },
+    internal_next_action: { rotulo: "Próxima ação", celula: (item) => elemento("strong", { text: PROXIMAS_ACOES[item.internal_next_action] || texto(item.internal_next_action) || "—" }) },
+    code_stage: { rotulo: "Código", celula: (item) => etapaInterna(item.code_stage) },
+    ld_stage: { rotulo: "LD", celula: (item) => etapaInterna(item.ld_stage) },
+    allocation_stage: { rotulo: "Alocação", celula: (item) => etapaInterna(item.allocation_stage) },
+    sigem_stage: { rotulo: "Postagem SIGEM", celula: (item) => etapaInterna(item.sigem_stage) },
     classification: { rotulo: "Classificação", celula: (item, tipo) => seloClassificacao(item.classification, tipo && tipo.not_found_is_expected) },
   };
 
@@ -689,6 +703,20 @@
     resposta.value = texto(item.answer);
     const observacoes = elemento("textarea", { id: "item-observacoes", rows: "2" });
     observacoes.value = texto(item.observations);
+    const seletorEtapa = (id, valor) => {
+      const select = elemento("select", { id });
+      Object.entries(ETAPAS_INTERNAS).forEach(([codigo, rotulo]) => {
+        const option = elemento("option", { value: codigo, text: rotulo });
+        if (codigo === valor) option.selected = true;
+        select.append(option);
+      });
+      return select;
+    };
+    const fluxoPostagem = tipo && tipo.code === "POSTAGEM_SIGEM";
+    const codigoEtapa = seletorEtapa("item-code-stage", item.code_stage || (item.document ? "concluido" : "pendente"));
+    const ldEtapa = seletorEtapa("item-ld-stage", item.ld_stage || "pendente");
+    const alocEtapa = seletorEtapa("item-allocation-stage", item.allocation_stage || "pendente");
+    const sigemEtapa = seletorEtapa("item-sigem-stage", item.sigem_stage || "pendente");
 
     blocos.push(elemento("section", { class: "flow-card" }, [
       elemento("div", { class: "flow-card-head" }, [elemento("h3", { text: "Tratar este item" })]),
@@ -697,9 +725,13 @@
         elemento("label", { class: "flow-campo", for: "item-responsavel" }, [elemento("span", { text: "Responsável" }), responsavel]),
         elemento("label", { class: "flow-campo", for: "item-documento" }, [
           elemento("span", { text: "Código do documento" }),
-          elemento("small", { text: "Preencher aqui é confirmar a identificação. Depois, reprocesse a triagem." }),
+          elemento("small", { text: "Se veio só o título, confirme o código aqui e reprocesse a triagem." }),
           documento,
         ]),
+        fluxoPostagem ? elemento("label", { class: "flow-campo", for: "item-code-stage" }, [elemento("span", { text: "Etapa · Identificação do código" }), codigoEtapa]) : null,
+        fluxoPostagem ? elemento("label", { class: "flow-campo", for: "item-ld-stage" }, [elemento("span", { text: "Etapa · Inclusão na LD" }), ldEtapa]) : null,
+        fluxoPostagem ? elemento("label", { class: "flow-campo", for: "item-allocation-stage" }, [elemento("span", { text: "Etapa · Alocação" }), alocEtapa]) : null,
+        fluxoPostagem ? elemento("label", { class: "flow-campo", for: "item-sigem-stage" }, [elemento("span", { text: "Etapa · Postagem no SIGEM" }), sigemEtapa]) : null,
         elemento("label", { class: "flow-campo larga", for: "item-resposta" }, [elemento("span", { text: "Resposta" }), resposta]),
         elemento("label", { class: "flow-campo larga", for: "item-observacoes" }, [elemento("span", { text: "Observações" }), observacoes]),
       ]),
@@ -711,6 +743,12 @@
               ["status", status.value, item.status],
               ["owner_name", responsavel.value, item.owner_name],
               ["document", documento.value, item.document],
+              ...(fluxoPostagem ? [
+                ["code_stage", codigoEtapa.value, item.code_stage],
+                ["ld_stage", ldEtapa.value, item.ld_stage],
+                ["allocation_stage", alocEtapa.value, item.allocation_stage],
+                ["sigem_stage", sigemEtapa.value, item.sigem_stage],
+              ] : []),
               ["answer", resposta.value, item.answer],
               ["observations", observacoes.value, item.observations],
             ].filter(([, novo, antigo]) => texto(novo) !== texto(antigo));

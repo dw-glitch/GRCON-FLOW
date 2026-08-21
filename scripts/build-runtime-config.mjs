@@ -19,11 +19,11 @@ const clean = (value = "") => String(value).trim();
 const PADRAO_URL = "https://hbfcqkbjrcmpdljlklol.supabase.co";
 const PADRAO_KEY = "sb_publishable_dxFhAsqOMcLUvYCtjQ_HTg_aG0qCkI0";
 
-const url = clean(process.env.FLOW_SUPABASE_URL) || clean(process.env.SUPABASE_URL) || PADRAO_URL;
-const key = clean(process.env.FLOW_SUPABASE_ANON_KEY)
-  || clean(process.env.SUPABASE_ANON_KEY)
-  || clean(process.env.SUPABASE_PUBLISHABLE_KEY)
-  || PADRAO_KEY;
+const url = clean(process.env.FLOW_SUPABASE_URL) || PADRAO_URL;
+const key = clean(process.env.FLOW_SUPABASE_ANON_KEY) || PADRAO_KEY;
+
+// Isolamento obrigatório: o GRCON Flow jamais herda SUPABASE_URL/KEY genéricas
+// da hospedagem. Apenas variáveis com prefixo FLOW_ podem trocar o projeto.
 
 if (/sb_secret_|service_role/i.test(key)) {
   throw new Error("A chave informada parece ser a service_role. Use a chave publicável (sb_publishable_…).");

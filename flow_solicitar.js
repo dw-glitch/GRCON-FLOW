@@ -149,48 +149,88 @@
     return entrada.type === "checkbox" ? entrada.checked : entrada.value;
   }
 
-  /** Entrada de documentos: colar lista, escolher arquivos ou arrastar. */
+  /** Entrada documental. Para Postagem no SIGEM, título é suficiente e código é opcional. */
   function montarDocumentos() {
     const tipo = estado.tipo;
+    const postagem = tipo.code === "POSTAGEM_SIGEM";
     const bloco = elemento("section", { class: "flow-card" });
 
-    const explicacao = tipo.requires_document
-      ? "Cole um ou mais códigos, um por linha."
-      : "Se não souber o código, siga sem preencher.";
-
     bloco.append(elemento("div", { class: "flow-card-head" }, [
-      elemento("h3", {}, [
-        "Documentos",
-        tipo.requires_document ? elemento("span", { class: "obrigatorio", text: "*", "aria-hidden": "true" }) : null,
-      ]),
-      elemento("p", { text: explicacao }),
+      elemento("h3", { text: postagem ? "Documentos para postagem" : "Documentos" }),
+      elemento("p", { text: postagem
+        ? "Informe o que precisa ser postado. Se ainda não houver código, coloque somente o título — a equipe fará a identificação, inclusão na LD e alocação antes da postagem."
+        : (tipo.requires_document ? "Cole um ou mais códigos, um por linha." : "Se não souber o código, siga sem preencher.") }),
     ]));
 
-    const colar = elemento("textarea", {
-      id: "sol-colar", rows: "3", placeholder:
-        "Cole os códigos, um por linha.\nC1O_RNEST_U32_3.1.1.1_INS_RIR_SPE-AST-320019\n5290.00-22313-91A-C1O-004",
-    });
+    if (postagem) {
+      const codigo = elemento("input", { id: "sol-novo-codigo", type: "text", autocomplete: "off", placeholder: "Código, se souber (opcional)" });
+      const titulo = elemento("input", { id: "sol-novo-titulo", type: "text", autocomplete: "off", placeholder: "Título ou descrição do documento" });
+      const adicionar = () => {
+        const cod = texto(codigo.value);
+        const tit = texto(titulo.value);
+        if (!cod && !tit) { avisar("Informe pelo menos o título ou o código do documento.", "erro"); return; }
+        const item = cod ? Docs.itemDeCodigo(cod, { titulo: tit }) : Docs.itemDeTitulo(tit, "");
+        acrescentar([item]);
+      };
+      codigo.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); adicionar(); } });
+      titulo.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); adicionar(); } });
 
-    const acoes = elemento("div", { class: "flow-acoes" }, [
-      elemento("button", {
+      bloco.append(elemento("div", { class: "flow-doc-add" }, [
+        elemento("label", { class: "flow-campo", for: "sol-novo-titulo" }, [
+          elemento("span", { text: "Título do documento" }),
+          elemento("small", { text: "Pode ser o nome que você conhece hoje; não precisa estar no padrão da LD." }),
+          titulo,
+        ]),
+        elemento("label", { class: "flow-campo", for: "sol-novo-codigo" }, [
+          elemento("span", { text: "Código do documento (opcional)" }),
+          elemento("small", { text: "Deixe vazio quando o documento for novo ou quando você não souber o código." }),
+          codigo,
+        ]),
+        elemento("button", { class: "secondary-button", type: "button", text: "Adicionar documento", onclick: adicionar }),
+      ]));
+
+      const colar = elemento("textarea", {
+        id: "sol-colar", rows: "4", placeholder:
+          "Cole vários títulos, um por linha. Também aceitamos CÓDIGO + TAB + TÍTULO.\nRelatório de inspeção da válvula VM-0001\n5290.00-22313-142-C1O-002\tMemória de cálculo...",
+      });
+      bloco.append(elemento("details", { class: "flow-lote" }, [
+        elemento("summary", { text: "Adicionar vários de uma vez" }),
+        elemento("label", { class: "flow-campo", for: "sol-colar" }, [
+          elemento("span", { text: "Lista de títulos/códigos" }),
+          elemento("small", { text: "Uma linha por documento. Título sozinho é válido; código não é obrigatório." }),
+          colar,
+        ]),
+        elemento("button", {
+          class: "secondary-button compact", type: "button", text: "Adicionar lista",
+          onclick: () => {
+            const novos = Docs.daListaFlexivel(colar.value);
+            if (!novos.length) { avisar("Nenhum documento informado na lista.", "erro"); return; }
+            acrescentar(novos);
+            colar.value = "";
+          },
+        }),
+      ]));
+    } else {
+      const colar = elemento("textarea", {
+        id: "sol-colar", rows: "3", placeholder:
+          "Cole os códigos, um por linha.\nC1O_RNEST_U32_3.1.1.1_INS_RIR_SPE-AST-320019\n5290.00-22313-91A-C1O-004",
+      });
+      bloco.append(elemento("label", { class: "flow-campo", for: "sol-colar" }, [
+        elemento("span", { text: "Lista de códigos" }), colar,
+      ]), elemento("button", {
         class: "secondary-button compact", type: "button", text: "Acrescentar da lista",
         onclick: () => {
           const novos = Docs.daListaColada(colar.value);
           if (!novos.length) { avisar("Nenhum código reconhecido no texto colado.", "erro"); return; }
-          acrescentar(novos);
-          colar.value = "";
+          acrescentar(novos); colar.value = "";
         },
-      }),
-      elemento("span", { class: "flow-carregando", id: "sol-contagem", style: "padding:0;font-size:.78rem" }),
-    ]);
+      }));
+    }
 
+    const contagem = elemento("span", { class: "flow-carregando", id: "sol-contagem", style: "padding:0;font-size:.78rem" });
     const lista = elemento("div", { class: "flow-itens", id: "sol-lista" });
-
-    bloco.append(elemento("label", { class: "flow-campo", for: "sol-colar" }, [
-      elemento("span", { text: "Lista de códigos" }), colar,
-    ]), acoes, lista);
-
-    desenharLista(lista, acoes.querySelector("#sol-contagem"));
+    bloco.append(contagem, lista);
+    desenharLista(lista, contagem, postagem);
     return bloco;
   }
 
@@ -307,23 +347,37 @@
     render();
   }
 
-  function desenharLista(destino, contagem) {
+  function desenharLista(destino, contagem, editavel = false) {
     destino.replaceChildren();
     if (contagem) {
       contagem.textContent = estado.documentos.length
-        ? `${estado.documentos.length} item(ns) nesta solicitação`
-        : "Nenhum item informado ainda";
+        ? `${estado.documentos.length} documento(s) nesta solicitação`
+        : "Nenhum documento adicionado ainda";
     }
     estado.documentos.forEach((item, indice) => {
       const semCodigo = !item.document;
+      let corpo;
+      if (editavel) {
+        const titulo = elemento("input", { type: "text", value: item.requested_title || "", placeholder: "Título ou descrição do documento", "aria-label": `Título do documento ${indice + 1}` });
+        const codigo = elemento("input", { type: "text", value: item.document || "", placeholder: "Código opcional", "aria-label": `Código do documento ${indice + 1}` });
+        titulo.addEventListener("input", () => { estado.documentos[indice].requested_title = titulo.value; });
+        codigo.addEventListener("change", () => {
+          const atual = estado.documentos[indice];
+          const valor = texto(codigo.value);
+          estado.documentos[indice] = valor
+            ? Docs.itemDeCodigo(valor, { titulo: titulo.value, referencia: atual.reference, arquivo: atual.file_name })
+            : { ...Docs.itemDeTitulo(titulo.value, atual.reference), file_name: atual.file_name || "" };
+        });
+        corpo = elemento("span", { class: "flow-item-corpo flow-item-edicao" }, [titulo, codigo]);
+      } else {
+        corpo = elemento("span", { class: "flow-item-corpo" }, [
+          elemento("code", { text: item.document || "sem código — a equipe irá identificar" }),
+          item.requested_title || item.file_name ? elemento("em", { text: item.requested_title || item.file_name }) : null,
+        ]);
+      }
       destino.append(elemento("div", { class: `flow-item ${semCodigo ? "flow-item-sem-codigo" : ""}` }, [
         elemento("span", { class: "flow-item-num", text: String(indice + 1).padStart(2, "0") }),
-        elemento("span", { class: "flow-item-corpo" }, [
-          elemento("code", { text: item.document || "sem código — vamos identificar" }),
-          item.requested_title || item.file_name
-            ? elemento("em", { text: item.requested_title || item.file_name })
-            : null,
-        ]),
+        corpo,
         elemento("button", {
           class: "text-button danger", type: "button", text: "Remover",
           "aria-label": `Remover item ${indice + 1}`,
@@ -434,7 +488,11 @@
       (campo) => campo.required && !texto(estado.formulario[campo.field_key])
     );
     if (faltando) return `Preencha “${faltando.label}”.`;
-    if (tipo.requires_document && !estado.documentos.length) {
+    if (tipo.code === "POSTAGEM_SIGEM") {
+      if (!estado.documentos.length) return "Adicione pelo menos um documento para postagem. O código pode ficar em branco.";
+      const vazio = estado.documentos.find((item) => !texto(item.document) && !texto(item.requested_title));
+      if (vazio) return "Todo item precisa ter pelo menos um título/descrição ou um código.";
+    } else if (tipo.requires_document && !estado.documentos.length) {
       return "Informe pelo menos um documento para este tipo de solicitação.";
     }
     return null;

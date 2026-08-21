@@ -229,6 +229,18 @@
   .flow-item-corpo code { font-family: var(--font-mono); font-size: .78rem; color: var(--text-1); overflow-wrap: anywhere; }
   .flow-item-corpo em { display: block; font-style: normal; font-size: .74rem; color: var(--text-3); overflow-wrap: anywhere; }
   .flow-item-sem-codigo code { color: var(--text-3); font-style: italic; }
+  .flow-doc-add {
+    display: grid; grid-template-columns: minmax(18rem, 1.6fr) minmax(14rem, 1fr) auto;
+    gap: var(--space-3); align-items: end; margin-bottom: var(--space-3);
+  }
+  .flow-item-edicao { display: grid; grid-template-columns: minmax(15rem, 1.5fr) minmax(13rem, 1fr); gap: .45rem; }
+  .flow-item-edicao input {
+    width: 100%; min-width: 0; padding: .52rem .58rem; border: 1px solid var(--border-2);
+    border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-1); font: inherit;
+  }
+  .flow-item-edicao input:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 1px; border-color: var(--brand-600); }
+  .flow-lote { margin-top: var(--space-3); padding: .7rem .8rem; border: 1px solid var(--border-1); border-radius: var(--radius-sm); background: var(--surface-2); }
+  .flow-lote summary { cursor: pointer; font-weight: 650; color: var(--brand-700); margin-bottom: .55rem; }
 
   /* ── Tabela ────────────────────────────────────────────────────────────── */
   .flow-tabela-wrap { overflow: auto; max-height: calc(100vh - 19rem); border: 1px solid var(--border-1); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow-1); }
@@ -523,4 +535,9 @@
     .flow-tabela-wrap { max-height: none; }
     .flow-footer { justify-content: center; text-align: center; }
   }
+}
+
+@media (max-width: 900px) {
+  .flow-doc-add { grid-template-columns: 1fr; align-items: stretch; }
+  .flow-item-edicao { grid-template-columns: 1fr; }
 }

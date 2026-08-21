@@ -110,6 +110,25 @@
   }
 
   /**
+   * Lista flexível para Postagem no SIGEM. Cada linha pode ser:
+   *   - apenas o título;
+   *   - apenas o código;
+   *   - código + título separados por TAB, ponto-e-vírgula ou |.
+   * O código continua opcional: título sem código vira item legítimo para a
+   * equipe identificar antes de incluir na LD, alocar e postar.
+   */
+  function daListaFlexivel(bruto) {
+    return texto(bruto).split(/\r?\n/).map((linha) => linha.trim()).filter(Boolean).map((linha) => {
+      const partes = linha.split(/\t|\s*[;|]\s*/).map((item) => texto(item)).filter(Boolean);
+      if (partes.length > 1 && pareceCodigo(partes[0])) {
+        return itemDeCodigo(partes[0], { titulo: partes.slice(1).join(" - ") });
+      }
+      if (pareceCodigo(linha)) return itemDeCodigo(linha);
+      return itemDeTitulo(linha, "");
+    });
+  }
+
+  /**
    * Arquivos arrastados. O código sai do nome, sem extensão e sem o sufixo de
    * postagem do SIGEM.
    *
@@ -469,6 +488,7 @@
     itemDeTitulo,
     itemDeReferencia,
     daListaColada,
+    daListaFlexivel,
     deArquivos,
     semRepetidos,
     lerFonteLd,

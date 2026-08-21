@@ -70,7 +70,8 @@
       itens.append(elemento("div", { class: "flow-item" }, [
         elemento("span", { class: "flow-item-num", text: String(indice + 1).padStart(2, "0") }),
         elemento("span", { class: "flow-item-corpo" }, [
-          elemento("code", { text: item.document || item.requested_title || "item sem código" }),
+          elemento("code", { text: item.document || "Código ainda não informado" }),
+          item.requested_title ? elemento("strong", { text: item.requested_title }) : null,
           item.answer ? elemento("em", { text: item.answer }) : null,
         ]),
         seloStatus(item.status),
