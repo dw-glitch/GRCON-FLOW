@@ -488,6 +488,8 @@ check("o painel mantém uma caixa persistente de notificações não lidas", () 
   assert.match(painel, /Api\.notificacoes\.marcarTodasLidas\(\)/);
   assert.match(painel, /carregarNotificacoes\(\)/,
     "a caixa precisa recuperar avisos perdidos enquanto a pessoa estava fora do painel");
+  assert.match(painel, /evento\.composedPath\(\)\.includes\(central\)/,
+    "redesenhar o conteúdo do botão não pode fechar a caixa no mesmo clique");
 });
 
 check("todo tipo de solicitação aceita somente até cinco anexos PDF, Excel e Word de 10 MB", () => {
