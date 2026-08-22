@@ -6,5 +6,6 @@ window.FLOW_CONFIG = Object.freeze({
   "uploadMaxMb": 10,
   "uploadMaxFiles": 5,
   "storageQuotaMb": 1024,
+  "databaseQuotaMb": 500,
   "ldUploadMaxMb": 100
 });

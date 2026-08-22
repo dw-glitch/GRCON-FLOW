@@ -21,6 +21,9 @@
       coluna.header.charAt(0) + coluna.header.slice(1).toLocaleLowerCase("pt-BR"))
     : ["Protocolo", "Tipo", "Solicitante", "Recebida", "Responsável", "Progresso", "Status", "Prazo"]);
   const INTERVALO_NOTIFICACOES_MS = 60000;
+  const INTERVALO_ARMAZENAMENTO_MS = 30000;
+  let pararObservacaoArmazenamento = null;
+  let timerArmazenamento = null;
 
   const estado = {
     aba: "solicitacoes",
@@ -144,12 +147,16 @@
     ])));
   }
 
-  async function montarArmazenamento(destino) {
-    if (!destino) return;
-    destino.className = "flow-armazenamento carregando";
-    destino.replaceChildren(elemento("span", { text: "Consultando armazenamento…" }));
+  async function montarArmazenamento(destino, silencioso = false) {
+    if (!destino || !destino.isConnected) return;
+    if (!silencioso) {
+      destino.className = "flow-armazenamento carregando";
+      destino.replaceChildren(elemento("span", { text: "Consultando armazenamento…" }));
+    }
     const { data, error } = await Api.armazenamento.resumo();
+    if (!destino.isConnected) return;
     if (error) {
+      if (silencioso) return;
       destino.className = "flow-armazenamento indisponivel";
       destino.replaceChildren(
         elemento("strong", { text: "Armazenamento" }),
@@ -160,30 +167,52 @@
 
     const resumo = Array.isArray(data) ? data[0] : data;
     const usados = Number(resumo && resumo.total_bytes) || 0;
+    const bancoBytes = Number(resumo && resumo.database_bytes) || 0;
     const anexosBytes = Number(resumo && resumo.attachment_bytes) || 0;
     const anexosArquivos = Number(resumo && resumo.attachment_files) || 0;
+    const ldBytes = Number(resumo && resumo.ld_bytes) || 0;
+    const normBytes = Number(resumo && resumo.norm_bytes) || 0;
     const cota = (Number(Api.config.storageQuotaMb) || 1024) * 1024 * 1024;
+    const cotaBanco = (Number(Api.config.databaseQuotaMb) || 500) * 1024 * 1024;
     const percentualReal = cota ? (usados / cota) * 100 : 0;
+    const percentualBanco = cotaBanco ? (bancoBytes / cotaBanco) * 100 : 0;
     const percentual = Math.min(100, Math.max(0, percentualReal));
-    const classe = percentualReal >= 85 ? "critico" : percentualReal >= 70 ? "atencao" : "ok";
+    const maiorPercentual = Math.max(percentualReal, percentualBanco);
+    const classe = maiorPercentual >= 85 ? "critico" : maiorPercentual >= 70 ? "atencao" : "ok";
+    const medido = resumo && resumo.measured_at ? new Date(resumo.measured_at) : new Date();
+    const horario = Number.isNaN(medido.getTime()) ? "agora" : medido.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
     destino.className = `flow-armazenamento ${classe}`;
     destino.replaceChildren(
       elemento("div", { class: "flow-armazenamento-texto" }, [
-        elemento("span", { text: "Armazenamento" }),
+        elemento("span", { text: "Storage do GRCON Flow" }),
         elemento("strong", { text: `${tamanhoArmazenamento(usados)} de ${tamanhoArmazenamento(cota)}` }),
       ]),
       elemento("div", {
         class: "flow-armazenamento-barra", role: "progressbar",
-        "aria-label": "Espaço de armazenamento utilizado",
+        "aria-label": "Storage de arquivos utilizado",
         "aria-valuemin": "0", "aria-valuemax": "100",
         "aria-valuenow": String(Math.round(percentual)),
       }, [elemento("i", { style: `width:${percentual}%` })]),
       elemento("span", {
         class: "flow-armazenamento-detalhe",
-        text: `Anexos: ${anexosArquivos.toLocaleString("pt-BR")} arquivo(s) · ${tamanhoArmazenamento(anexosBytes)}`,
+        text: `Banco: ${tamanhoArmazenamento(bancoBytes)} de ${tamanhoArmazenamento(cotaBanco)} · Anexos: ${anexosArquivos.toLocaleString("pt-BR")} (${tamanhoArmazenamento(anexosBytes)}) · LDs: ${tamanhoArmazenamento(ldBytes)} · Normas: ${tamanhoArmazenamento(normBytes)} · ${horario}`,
       })
     );
+  }
+
+  function pararAtualizacaoArmazenamento() {
+    if (timerArmazenamento) root.clearInterval(timerArmazenamento);
+    timerArmazenamento = null;
+    if (typeof pararObservacaoArmazenamento === "function") pararObservacaoArmazenamento();
+    pararObservacaoArmazenamento = null;
+  }
+
+  function iniciarAtualizacaoArmazenamento() {
+    pararAtualizacaoArmazenamento();
+    const atualizar = () => montarArmazenamento(document.getElementById("painel-armazenamento"), true);
+    pararObservacaoArmazenamento = Api.armazenamento.observar(atualizar);
+    timerArmazenamento = root.setInterval(atualizar, INTERVALO_ARMAZENAMENTO_MS);
   }
 
   function aplicarIndicador(indicador) {
@@ -1307,6 +1336,7 @@
       botao.setAttribute("aria-selected", botao.dataset.aba === estado.aba ? "true" : "false");
     });
 
+    pararAtualizacaoArmazenamento();
     if (estado.aba === "solicitacoes") {
       conteudo.replaceChildren(
         elemento("div", { id: "painel-indicadores", class: "flow-indicadores" }),
@@ -1317,6 +1347,7 @@
       );
       montarIndicadores(document.getElementById("painel-indicadores"));
       montarArmazenamento(document.getElementById("painel-armazenamento"));
+      iniciarAtualizacaoArmazenamento();
       desenharTabela();
     } else if (estado.aba === "lds") {
       root.FlowLd.montar(conteudo);

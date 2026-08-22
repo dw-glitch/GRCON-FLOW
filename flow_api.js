@@ -742,6 +742,16 @@
     async resumo() {
       return chamar(client.rpc("flow_storage_usage"), "consultar armazenamento");
     },
+    observar(fn) {
+      if (!state.session || typeof fn !== "function") return () => {};
+      const sufixo = state.session.user.id || Math.random().toString(36).slice(2);
+      const canal = client.channel(`flow-armazenamento-${sufixo}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "flow_attachments" }, fn)
+        .on("postgres_changes", { event: "*", schema: "public", table: "flow_ld_versions" }, fn)
+        .on("postgres_changes", { event: "*", schema: "public", table: "flow_norm_versions" }, fn)
+        .subscribe();
+      return () => { client.removeChannel(canal); };
+    },
   };
 
   const historico = {

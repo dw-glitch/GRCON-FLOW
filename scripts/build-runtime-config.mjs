@@ -42,6 +42,8 @@ const config = {
   // Cota atual do projeto Free. Se o plano mudar, basta ajustar a variável no
   // ambiente da hospedagem; o painel continuará calculando o uso real.
   storageQuotaMb: Number(clean(process.env.FLOW_STORAGE_QUOTA_MB)) || 1024,
+  // Limite de tamanho do banco no plano Free. Mantido separado do Storage.
+  databaseQuotaMb: Number(clean(process.env.FLOW_DATABASE_QUOTA_MB)) || 500,
   ldUploadMaxMb: Number(clean(process.env.FLOW_LD_UPLOAD_MAX_MB)) || 100,
 };
 
