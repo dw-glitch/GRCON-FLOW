@@ -52,15 +52,18 @@
   }
 
   function tamanhoArmazenamento(bytes) {
+    // O Dashboard do Supabase apresenta capacidade em unidades decimais
+    // (1 MB = 1.000.000 bytes; 1 GB = 1.000 MB). Usar a mesma convenção evita
+    // que 63 milhões de bytes apareçam como ~60 MiB no Flow.
     const tamanho = Math.max(0, Number(bytes) || 0);
-    if (tamanho < 1024) return `${tamanho.toLocaleString("pt-BR")} B`;
-    if (tamanho < 1024 * 1024) {
-      return `${(tamanho / 1024).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} KB`;
+    if (tamanho < 1000) return `${tamanho.toLocaleString("pt-BR")} B`;
+    if (tamanho < 1000 * 1000) {
+      return `${(tamanho / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} KB`;
     }
-    if (tamanho < 1024 * 1024 * 1024) {
-      return `${(tamanho / (1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
+    if (tamanho < 1000 * 1000 * 1000) {
+      return `${(tamanho / (1000 * 1000)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
     }
-    return `${(tamanho / (1024 * 1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} GB`;
+    return `${(tamanho / (1000 * 1000 * 1000)).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} GB`;
   }
 
   // ---------------------------------------------------------------------------
@@ -148,7 +151,7 @@
   }
 
   async function montarArmazenamento(destino, silencioso = false) {
-    if (!destino || !destino.isConnected) return;
+    if (!Api.auth.ehProprietario() || !destino || !destino.isConnected) return;
     if (!silencioso) {
       destino.className = "flow-armazenamento carregando";
       destino.replaceChildren(elemento("span", { text: "Consultando armazenamento…" }));
@@ -172,8 +175,8 @@
     const anexosArquivos = Number(resumo && resumo.attachment_files) || 0;
     const ldBytes = Number(resumo && resumo.ld_bytes) || 0;
     const normBytes = Number(resumo && resumo.norm_bytes) || 0;
-    const cota = (Number(Api.config.storageQuotaMb) || 1024) * 1024 * 1024;
-    const cotaBanco = (Number(Api.config.databaseQuotaMb) || 500) * 1024 * 1024;
+    const cota = (Number(Api.config.storageQuotaMb) || 1000) * 1000 * 1000;
+    const cotaBanco = (Number(Api.config.databaseQuotaMb) || 500) * 1000 * 1000;
     const percentualReal = cota ? (usados / cota) * 100 : 0;
     const percentualBanco = cotaBanco ? (bancoBytes / cotaBanco) * 100 : 0;
     const percentual = Math.min(100, Math.max(0, percentualReal));
@@ -185,7 +188,7 @@
     destino.className = `flow-armazenamento ${classe}`;
     destino.replaceChildren(
       elemento("div", { class: "flow-armazenamento-texto" }, [
-        elemento("span", { text: "Storage do GRCON Flow" }),
+        elemento("span", { text: "Uso atual dos arquivos · GRCON Flow" }),
         elemento("strong", { text: `${tamanhoArmazenamento(usados)} de ${tamanhoArmazenamento(cota)}` }),
       ]),
       elemento("div", {
@@ -196,7 +199,7 @@
       }, [elemento("i", { style: `width:${percentual}%` })]),
       elemento("span", {
         class: "flow-armazenamento-detalhe",
-        text: `Banco: ${tamanhoArmazenamento(bancoBytes)} de ${tamanhoArmazenamento(cotaBanco)} · Anexos: ${anexosArquivos.toLocaleString("pt-BR")} (${tamanhoArmazenamento(anexosBytes)}) · LDs: ${tamanhoArmazenamento(ldBytes)} · Normas: ${tamanhoArmazenamento(normBytes)} · ${horario}`,
+        text: `Banco atual: ${tamanhoArmazenamento(bancoBytes)} de ${tamanhoArmazenamento(cotaBanco)} · Anexos: ${anexosArquivos.toLocaleString("pt-BR")} (${tamanhoArmazenamento(anexosBytes)}) · LDs: ${tamanhoArmazenamento(ldBytes)} · Normas: ${tamanhoArmazenamento(normBytes)} · medido ${horario} · O resumo do Supabase é média do ciclo e pode ter defasagem.`,
       })
     );
   }
@@ -210,6 +213,7 @@
 
   function iniciarAtualizacaoArmazenamento() {
     pararAtualizacaoArmazenamento();
+    if (!Api.auth.ehProprietario()) return;
     const atualizar = () => montarArmazenamento(document.getElementById("painel-armazenamento"), true);
     pararObservacaoArmazenamento = Api.armazenamento.observar(atualizar);
     timerArmazenamento = root.setInterval(atualizar, INTERVALO_ARMAZENAMENTO_MS);
@@ -1338,16 +1342,21 @@
 
     pararAtualizacaoArmazenamento();
     if (estado.aba === "solicitacoes") {
-      conteudo.replaceChildren(
+      const blocos = [
         elemento("div", { id: "painel-indicadores", class: "flow-indicadores" }),
-        elemento("div", { id: "painel-armazenamento", class: "flow-armazenamento carregando" }),
-        montarFiltros(),
-        montarLote(),
-        elemento("div", { id: "painel-tabela" })
-      );
+      ];
+      // Capacidade do projeto é visível somente ao proprietário. Não deixamos
+      // um bloco vazio nem fazemos a RPC para administradores/operadores.
+      if (Api.auth.ehProprietario()) {
+        blocos.push(elemento("div", { id: "painel-armazenamento", class: "flow-armazenamento carregando" }));
+      }
+      blocos.push(montarFiltros(), montarLote(), elemento("div", { id: "painel-tabela" }));
+      conteudo.replaceChildren(...blocos);
       montarIndicadores(document.getElementById("painel-indicadores"));
-      montarArmazenamento(document.getElementById("painel-armazenamento"));
-      iniciarAtualizacaoArmazenamento();
+      if (Api.auth.ehProprietario()) {
+        montarArmazenamento(document.getElementById("painel-armazenamento"));
+        iniciarAtualizacaoArmazenamento();
+      }
       desenharTabela();
     } else if (estado.aba === "lds") {
       root.FlowLd.montar(conteudo);

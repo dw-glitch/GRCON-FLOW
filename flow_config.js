@@ -5,7 +5,7 @@ window.FLOW_CONFIG = Object.freeze({
   "supabaseKey": "sb_publishable_dxFhAsqOMcLUvYCtjQ_HTg_aG0qCkI0",
   "uploadMaxMb": 10,
   "uploadMaxFiles": 5,
-  "storageQuotaMb": 1024,
+  "storageQuotaMb": 1000,
   "databaseQuotaMb": 500,
   "ldUploadMaxMb": 100
 });

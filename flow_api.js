@@ -740,10 +740,13 @@
 
   const armazenamento = {
     async resumo() {
+      // Métricas de capacidade são informação administrativa sensível e só
+      // pertencem ao proprietário. A RPC repete a mesma regra no servidor.
+      if (!auth.ehProprietario()) return { data: null, error: "Somente o proprietário pode consultar o armazenamento." };
       return chamar(client.rpc("flow_storage_usage"), "consultar armazenamento");
     },
     observar(fn) {
-      if (!state.session || typeof fn !== "function") return () => {};
+      if (!state.session || !auth.ehProprietario() || typeof fn !== "function") return () => {};
       const sufixo = state.session.user.id || Math.random().toString(36).slice(2);
       const canal = client.channel(`flow-armazenamento-${sufixo}`)
         .on("postgres_changes", { event: "*", schema: "public", table: "flow_attachments" }, fn)
