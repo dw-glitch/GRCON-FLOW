@@ -62,6 +62,8 @@
     return null;
   }
 
+  // FlowApi é congelado apenas no primeiro nível; o contrato de anexos é um
+  // objeto próprio e pode receber estas regras sem reescrever a camada inteira.
   if (Api.anexos) {
     Api.anexos.maximo = MAX_ANEXOS;
     Api.anexos.extensoes = EXTENSOES;
@@ -131,7 +133,8 @@
     };
   }
 
-  // A classificação responde primeiro à pergunta operacional: novo ou existente.
+  // Vocabulário do painel: a classificação passa a responder primeiro à
+  // pergunta operacional mais importante — é novo ou já existe na LD?
   if (Ui.CLASSIFICACOES) {
     if (Ui.CLASSIFICACOES.PRONTO) Ui.CLASSIFICACOES.PRONTO.rotulo = "JÁ EXISTE · alocado";
     if (Ui.CLASSIFICACOES.ACAO_NECESSARIA) Ui.CLASSIFICACOES.ACAO_NECESSARIA.rotulo = "JÁ EXISTE · sem alocação";
