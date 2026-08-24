@@ -22,6 +22,25 @@
     ]);
   }
 
+  function situacaoLd(item) {
+    const status = texto(item.ld_presence_status);
+    if (status === "NOVO") return "NOVO · não consta nas LDs vigentes";
+    if (status === "JA_EXISTE") {
+      const base = `JÁ EXISTE${texto(item.ld_name) ? ` · ${texto(item.ld_name)}` : ""}`;
+      return texto(item.allocation)
+        ? `${base} · alocação ${texto(item.allocation)}`
+        : `${base} · sem alocação identificada`;
+    }
+    if (status === "JA_EXISTE_DIVERGENTE") {
+      return texto(item.allocation)
+        ? `JÁ EXISTE · validar divergência · alocação ${texto(item.allocation)}`
+        : "JÁ EXISTE · validar informações nas LDs";
+    }
+    if (status === "POSSIVEL_EXISTENTE") return "POSSÍVEL EXISTENTE · código em validação";
+    if (status === "PENDENTE_IDENTIFICACAO") return "IDENTIFICAÇÃO PENDENTE · código ainda não confirmado";
+    return "";
+  }
+
   function cartaoSolicitacao(solicitacao) {
     const fechada = ["concluido", "cancelado"].includes(solicitacao.status);
     return elemento("article", { class: "flow-card" }, [
@@ -67,11 +86,20 @@
 
     const itens = elemento("div", { class: "flow-itens" });
     (data.items || []).forEach((item, indice) => {
+      const ld = situacaoLd(item);
+      const detalhes = [
+        texto(item.discipline),
+        texto(item.revision) ? `rev. ${texto(item.revision)}` : "",
+        texto(item.last_grdt) ? `última GRDT ${texto(item.last_grdt)}` : "",
+      ].filter(Boolean).join(" · ");
+
       itens.append(elemento("div", { class: "flow-item" }, [
         elemento("span", { class: "flow-item-num", text: String(indice + 1).padStart(2, "0") }),
         elemento("span", { class: "flow-item-corpo" }, [
           elemento("code", { text: item.document || "Código ainda não informado" }),
           item.requested_title ? elemento("strong", { text: item.requested_title }) : null,
+          ld ? elemento("em", { text: ld }) : null,
+          detalhes ? elemento("em", { text: detalhes }) : null,
           item.requires_pdf_excel_pair ? elemento("em", { text:
             item.pdf_attachment_ready && item.excel_attachment_ready
               ? "N-1710 · PDF + Excel recebidos"
@@ -136,7 +164,6 @@
       root.FlowUi.montarRodape()
     );
 
-    // Protocolo vindo por link, logo depois do envio.
     const parametros = new URLSearchParams(root.location.search);
     const protocoloDaUrl = parametros.get("protocolo");
     if (protocoloDaUrl) { entrada.value = protocoloDaUrl; consultarProtocolo(protocoloDaUrl, resultado); }
