@@ -91,9 +91,15 @@ novamente se algum falhar. A equipe baixa o arquivo original na ficha da
 solicitação por um link temporário; o bucket não é público.
 
 **Exclusão é administrativa e permanente.** Administrador e proprietário podem
-excluir uma solicitação pela ficha do painel. O aplicativo exige digitar o
-protocolo e confirmar a ação; remove primeiro os anexos pelo Storage API e só
-então apaga a solicitação, seus itens, triagens, histórico e comentários.
+excluir uma solicitação pela ficha do painel. Uma caixa única mostra o que vai
+sumir e só libera o botão quando o protocolo é digitado; então o aplicativo
+remove os anexos pelo Storage API e só depois apaga a solicitação, seus itens,
+triagens, histórico e comentários.
+
+Toda pergunta do aplicativo é da própria tela — nenhuma sai pelo `confirm` do
+navegador, que trava a aba, ignora o tema, não cabe em tela pequena e não sabe
+dizer o que está sendo apagado. A caixa devolve o foco de onde veio, prende o
+Tab e, quando não há nada a digitar, começa com o cursor em "Cancelar".
 
 ### Classificações
 

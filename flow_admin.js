@@ -76,7 +76,10 @@
         elemento("button", {
           class: "text-button danger", type: "button", text: "Remover",
           onclick: async () => {
-            if (!Ui.confirmar(`Remover o campo “${item.label}”? Solicitações já registradas mantêm o que foi respondido.`)) return;
+            if (!await Ui.confirmar(`Remover o campo “${item.label}”?`, {
+              titulo: "Remover campo", rotuloConfirmar: "Remover", rotuloCancelar: "Manter", perigo: true,
+              ajuda: "Solicitações já registradas mantêm o que foi respondido.",
+            })) return;
             const { error } = await Api.tipos.removerCampo(item.id);
             if (error) { avisar(error, "erro"); return; }
             avisar("Campo removido.", "ok");
@@ -428,7 +431,10 @@
           elemento("button", {
             class: "text-button danger", type: "button", text: "Remover",
             onclick: async () => {
-              if (!Ui.confirmar(`Tirar ${entrada.email} da lista?\n\nQuem já entrou continua com o papel atual — para rebaixar, use a aba Usuários.`)) return;
+              if (!await Ui.confirmar(`Tirar ${entrada.email} da lista?`, {
+                titulo: "Remover autorização", rotuloConfirmar: "Remover", rotuloCancelar: "Manter", perigo: true,
+                ajuda: "Quem já entrou continua com o papel atual — para rebaixar, use a aba Usuários.",
+              })) return;
               const { error } = await Api.acesso.remover(entrada.email);
               if (error) { avisar(error, "erro"); return; }
               avisar("Autorização removida.", "ok");

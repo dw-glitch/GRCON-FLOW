@@ -286,9 +286,92 @@
     root.history.replaceState({}, "", root.location.pathname + (busca ? `?${busca}` : ""));
   }
 
-  /** Confirmação simples, para ações que apagam ou publicam algo. */
-  function confirmar(mensagem) {
-    return root.confirm(mensagem);
+  /**
+   * Confirmação de uma ação que apaga ou publica algo.
+   *
+   * Devolve uma **promessa**: a caixa é da aplicação, não do navegador, e a
+   * resposta chega depois. Todo chamador precisa `await` — sem ele, o valor
+   * testado seria a promessa, sempre verdadeira, e a ação seguiria sem
+   * confirmação nenhuma.
+   *
+   * `exigirTexto` pede que a pessoa digite algo exato (o protocolo, por
+   * exemplo) antes de liberar o botão. Substitui o par prompt+confirm nativo,
+   * que perguntava duas vezes e ainda assim não conseguia dizer, na segunda,
+   * o que estava sendo apagado.
+   */
+  function confirmar(mensagem, opcoes = {}) {
+    const {
+      titulo = "Confirmar",
+      rotuloConfirmar = "Confirmar",
+      rotuloCancelar = "Cancelar",
+      perigo = false,
+      exigirTexto = "",
+      ajuda = "",
+    } = opcoes;
+
+    return new Promise((resolver) => {
+      let respondido = false;
+      const responder = (valor) => {
+        if (respondido) return;
+        respondido = true;
+        resolver(valor);
+      };
+
+      const alvo = texto(exigirTexto);
+      const entrada = alvo
+        ? elemento("input", {
+          id: "flow-confirmar-texto", type: "text", autocomplete: "off",
+          autocapitalize: "characters", spellcheck: "false",
+        })
+        : null;
+
+      const botaoConfirmar = elemento("button", {
+        class: perigo ? "danger-button" : "primary-button", type: "button",
+        text: rotuloConfirmar, disabled: alvo ? true : null,
+      });
+
+      if (entrada) {
+        const conferir = () => {
+          botaoConfirmar.disabled = texto(entrada.value).toUpperCase() !== alvo.toUpperCase();
+        };
+        entrada.addEventListener("input", conferir);
+        entrada.addEventListener("keydown", (evento) => {
+          if (evento.key !== "Enter") return;
+          evento.preventDefault();
+          if (!botaoConfirmar.disabled) botaoConfirmar.click();
+        });
+      }
+
+      const controle = abrirModal({
+        titulo,
+        aoFechar: () => responder(false),
+        montarCorpo: () => [
+          elemento("p", { style: "margin:0;white-space:pre-wrap", text: texto(mensagem) }),
+          entrada ? elemento("label", { class: "flow-campo", for: "flow-confirmar-texto" }, [
+            elemento("span", { text: `Digite ${alvo} para confirmar` }),
+            entrada,
+          ]) : null,
+          ajuda ? elemento("p", { style: "margin:0;font-size:.78rem;color:var(--text-3)", text: ajuda }) : null,
+        ],
+        montarAcoes: (fechar) => {
+          botaoConfirmar.addEventListener("click", () => { responder(true); fechar(); });
+          return [
+            elemento("button", {
+              class: "secondary-button", type: "button", text: rotuloCancelar,
+              onclick: () => { responder(false); fechar(); },
+            }),
+            botaoConfirmar,
+          ];
+        },
+      });
+
+      // Sem campo para digitar, o foco começa em "Cancelar": numa caixa que
+      // pergunta se pode apagar, a tecla Enter não deve apagar.
+      if (!entrada) {
+        const cancelar = $(".flow-modal-acoes .secondary-button", controle.painel);
+        if (cancelar) cancelar.focus();
+      }
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -298,7 +381,7 @@
   // onde veio e prende o Tab dentro do diálogo: quem navega por teclado não
   // pode ser largado numa página que continua visível atrás da caixa.
   // ---------------------------------------------------------------------------
-  function abrirModal({ titulo, descricao = "", montarCorpo, montarAcoes = null } = {}) {
+  function abrirModal({ titulo, descricao = "", montarCorpo, montarAcoes = null, aoFechar = null } = {}) {
     const anterior = doc.activeElement;
     const fundo = elemento("div", { class: "flow-modal" });
     const painel = elemento("div", {
@@ -311,7 +394,15 @@
     }
 
     function aoTeclar(evento) {
-      if (evento.key === "Escape") { evento.preventDefault(); fechar(); return; }
+      if (evento.key === "Escape") {
+        evento.preventDefault();
+        // O Escape morre aqui. A tela por trás também escuta Escape — a ficha
+        // do painel, a caixa de notificações — e sem esta parada um Escape só
+        // fecharia a pergunta e o que estava sendo perguntado, junto.
+        evento.stopPropagation();
+        fechar();
+        return;
+      }
       if (evento.key !== "Tab") return;
       const lista = focaveis();
       if (!lista.length) return;
@@ -326,6 +417,9 @@
       fundo.remove();
       doc.body.classList.remove("p1-modal-open");
       if (anterior && typeof anterior.focus === "function") anterior.focus();
+      // Sair pelo Escape, pelo fundo ou pelo X é uma resposta como outra
+      // qualquer: quem espera por ela precisa ser avisado dos três jeitos.
+      if (typeof aoFechar === "function") aoFechar();
     }
 
     // `append` converte null no texto "null"; só `elemento` filtra por conta

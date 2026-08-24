@@ -717,19 +717,23 @@
     if (botaoReprocessar) botaoReprocessar.addEventListener("click", reprocessar);
 
     const excluir = async (evento) => {
-      const protocolo = texto(solicitacao.protocol).toUpperCase();
-      const digitado = root.prompt(
-        `A exclusão é permanente e remove itens, histórico, comentários e anexos.\n\nPara continuar, digite o protocolo ${protocolo}:`,
-        ""
-      );
-      if (digitado === null) return;
-      if (texto(digitado).toUpperCase() !== protocolo) {
-        avisar("Protocolo diferente. A solicitação não foi excluída.", "erro");
-        return;
-      }
-      if (!Ui.confirmar(`Excluir permanentemente ${protocolo}? Esta ação não pode ser desfeita.`)) return;
-
       const botao = evento.currentTarget;
+      const protocolo = texto(solicitacao.protocol).toUpperCase();
+      // Uma caixa só, que mostra o que vai sumir e só libera o botão quando o
+      // protocolo confere. O par prompt+confirm perguntava duas vezes e, na
+      // segunda, já não dizia de qual solicitação estava falando.
+      const confirmado = await Ui.confirmar(
+        `Excluir permanentemente ${protocolo}?\n\nSaem junto os itens, as triagens, o histórico, os comentários e os anexos. Não há como desfazer.`,
+        {
+          titulo: "Excluir solicitação",
+          rotuloConfirmar: "Excluir permanentemente",
+          rotuloCancelar: "Manter",
+          perigo: true,
+          exigirTexto: protocolo,
+        }
+      );
+      if (!confirmado) return;
+
       botao.disabled = true;
       botao.textContent = "Excluindo…";
       const { error } = await Api.solicitacoes.excluir(solicitacao.id, solicitacao.anexos || []);
@@ -817,8 +821,13 @@
           title: itens.some((item) => item.requires_pdf_excel_pair && !(item.pdf_attachment_ready && item.excel_attachment_ready))
             ? "Complete o PDF + Excel dos itens LI/MC antes de concluir." : "",
           onclick: async (evento) => {
-            if (!Ui.confirmar("Marcar todos os itens desta solicitação como concluídos?")) return;
+            // `currentTarget` é anulado assim que o manipulador cede a vez; a
+            // caixa de confirmação agora é assíncrona, então o botão é guardado
+            // antes de perguntar.
             const botaoConcluir = evento.currentTarget;
+            if (!await Ui.confirmar("Marcar todos os itens desta solicitação como concluídos?", {
+              titulo: "Concluir itens", rotuloConfirmar: "Concluir todos",
+            })) return;
             botaoConcluir.disabled = true;
             botaoConcluir.textContent = "Concluindo…";
             const { error } = await Api.itens.atualizar(itens.map((i) => i.id), "status", "concluido", "Concluído em lote pela ficha");
@@ -928,7 +937,10 @@
           elemento("button", {
             class: "secondary-button compact", type: "button", text: "É este",
             onclick: async () => {
-              if (!Ui.confirmar(`Confirmar ${candidato.document} como o código deste item?`)) return;
+              if (!await Ui.confirmar(
+                `Confirmar ${candidato.document} como o código deste item?\n\n${candidato.title || ""}`.trim(),
+                { titulo: "Confirmar código", rotuloConfirmar: "É este", ajuda: "O item será triado de novo com o código confirmado." }
+              )) return;
               const { error } = await Api.itens.atualizar([item.id], "document", candidato.document,
                 "Código confirmado pelo operador a partir dos candidatos por título");
               if (error) { avisar(error, "erro"); return; }
@@ -1566,7 +1578,9 @@
 
   async function excluirNotificacao(notificacao) {
     if (estado.notificacaoExcluindoId || estado.notificacoesExcluindoTodas) return;
-    if (!Ui.confirmar("Excluir esta notificação permanentemente?")) return;
+    if (!await Ui.confirmar("Excluir esta notificação permanentemente?", {
+      titulo: "Excluir notificação", rotuloConfirmar: "Excluir", rotuloCancelar: "Manter", perigo: true,
+    })) return;
     estado.notificacaoExcluindoId = notificacao.id;
     desenharNotificacoes();
     const { error } = await Api.notificacoes.excluir(notificacao.id);
@@ -1584,7 +1598,9 @@
 
   async function excluirTodasNotificacoes() {
     if (estado.notificacaoExcluindoId || estado.notificacoesExcluindoTodas) return;
-    if (!Ui.confirmar("Excluir permanentemente todas as suas notificações?")) return;
+    if (!await Ui.confirmar("Excluir permanentemente todas as suas notificações?", {
+      titulo: "Limpar a caixa", rotuloConfirmar: "Excluir todas", rotuloCancelar: "Manter", perigo: true,
+    })) return;
     estado.notificacoesExcluindoTodas = true;
     desenharNotificacoes();
     const { error } = await Api.notificacoes.excluirTodas();

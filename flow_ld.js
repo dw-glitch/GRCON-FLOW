@@ -368,7 +368,10 @@
           ["inativa", "pronta"].includes(versao.status) && versao.document_count > 0 ? elemento("button", {
             class: "text-button", type: "button", text: "Reativar",
             onclick: async () => {
-              if (!Ui.confirmar(`Voltar a usar esta versão de ${ld.code} nas triagens?`)) return;
+              if (!await Ui.confirmar(`Voltar a usar esta versão de ${ld.code} nas triagens?`, {
+                titulo: "Reativar versão", rotuloConfirmar: "Reativar",
+                ajuda: "A versão vigente hoje passa a inativa, sem ser apagada.",
+              })) return;
               const { error } = await Api.lds.ativarVersao(versao.id);
               if (error) { avisar(error, "erro"); return; }
               avisar("Versão reativada.", "ok");
@@ -378,7 +381,10 @@
           versao.status !== "ativa" ? elemento("button", {
             class: "text-button danger", type: "button", text: "Excluir",
             onclick: async () => {
-              if (!Ui.confirmar("Excluir esta versão e os documentos indexados dela? As triagens que a citam continuam registrando qual versão usaram.")) return;
+              if (!await Ui.confirmar("Excluir esta versão e os documentos indexados dela?", {
+                titulo: "Excluir versão da LD", rotuloConfirmar: "Excluir", rotuloCancelar: "Manter", perigo: true,
+                ajuda: "As triagens que a citam continuam registrando qual versão usaram.",
+              })) return;
               const { error } = await Api.lds.removerVersao(versao.id);
               if (error) { avisar(error, "erro"); return; }
               avisar("Versão removida.", "ok");

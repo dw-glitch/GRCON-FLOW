@@ -612,9 +612,59 @@ check("o painel exige o protocolo e confirmação antes da exclusão permanente"
   const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
   assert.match(painel, /text: "Excluir solicitação"/);
   assert.match(painel, /Api\.auth\.ehAdmin\(\)/);
-  assert.match(painel, /root\.prompt\(/);
-  assert.match(painel, /Ui\.confirmar\(`Excluir permanentemente/);
+  assert.match(painel, /exigirTexto: protocolo/, "a exclusão só libera quem digitar o protocolo");
+  assert.match(painel, /perigo: true/);
   assert.match(painel, /Api\.solicitacoes\.excluir\(solicitacao\.id, solicitacao\.anexos \|\| \[\]\)/);
+});
+
+// ── Perguntas são da aplicação, não do navegador ───────────────────────────
+
+const ARQUIVOS_DO_APP = fs.readdirSync(root)
+  .filter((nome) => /^flow_[a-z_]+\.js$/.test(nome) && nome !== "flow_config.js");
+
+check("nenhuma pergunta sai pelo diálogo nativo do navegador", () => {
+  // `confirm` e `prompt` travam a aba, ignoram o tema, não cabem em telas
+  // pequenas e não sabem dizer o que está sendo apagado.
+  ARQUIVOS_DO_APP.forEach((nome) => {
+    const fonte = fs.readFileSync(path.join(root, nome), "utf8");
+    assert.doesNotMatch(fonte, /\b(root|window)\.(confirm|prompt)\(/, `${nome} ainda usa diálogo nativo`);
+  });
+  const ui = fs.readFileSync(path.join(root, "flow_ui.js"), "utf8");
+  assert.match(ui, /return new Promise\(\(resolver\) => \{/, "a confirmação passou a ser assíncrona");
+});
+
+check("toda confirmação é esperada com await", () => {
+  // Sem `await`, o valor testado é a promessa — sempre verdadeira — e a ação
+  // destrutiva seguiria adiante como se alguém tivesse confirmado.
+  ARQUIVOS_DO_APP.forEach((nome) => {
+    const fonte = fs.readFileSync(path.join(root, nome), "utf8");
+    for (const achado of fonte.matchAll(/(.{0,8})Ui\.confirmar\(/g)) {
+      assert.ok(achado[1].endsWith("await "), `${nome}: confirmação sem await — "${achado[0]}"`);
+    }
+  });
+});
+
+check("a caixa não leva embora a tela que está atrás dela", () => {
+  const ui = fs.readFileSync(path.join(root, "flow_ui.js"), "utf8");
+  assert.match(ui, /evento\.stopPropagation\(\);\s*\n\s*fechar\(\);/,
+    "o Escape precisa morrer na caixa: a ficha e a caixa de notificações também o escutam");
+  assert.match(ui, /if \(typeof aoFechar === "function"\) aoFechar\(\);/,
+    "sair pelo Escape, pelo fundo ou pelo X precisa responder como um cancelar");
+});
+
+check("o botão é guardado antes de perguntar", () => {
+  // `currentTarget` é anulado quando o manipulador cede a vez. Com a caixa
+  // assíncrona, lê-lo depois do await devolveria null e quebraria o estado de
+  // "Excluindo…".
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  for (const trecho of painel.split(/onclick: async \(evento\) => \{/).slice(1)) {
+    const corpo = trecho.slice(0, 900);
+    const usoDoBotao = corpo.indexOf("evento.currentTarget");
+    const primeiroAwait = corpo.indexOf("await ");
+    if (usoDoBotao < 0 || primeiroAwait < 0) continue;
+    assert.ok(usoDoBotao < primeiroAwait,
+      "currentTarget precisa ser lido antes do primeiro await do manipulador");
+  }
 });
 
 check("a listagem de LDs informa a relação histórica sem ambiguidade", () => {

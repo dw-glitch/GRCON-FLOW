@@ -120,7 +120,10 @@
             ? elemento("button", {
               class: "text-button", type: "button", text: "Ativar",
               onclick: async () => {
-                if (!Ui.confirmar(`Ativar a revisão ${versao.revision} de ${norma.code}? As próximas análises passarão a usar essa regra.`)) return;
+                if (!await Ui.confirmar(
+                  `Ativar a revisão ${versao.revision} de ${norma.code}?`,
+                  { titulo: "Ativar revisão", rotuloConfirmar: "Ativar", ajuda: "As próximas análises passarão a usar essa regra; a revisão anterior continua no histórico." }
+                )) return;
                 const { error } = await Api.normas.ativarVersao(versao.id);
                 if (error) { avisar(error, "erro"); return; }
                 avisar("Revisão normativa ativada.", "ok");
