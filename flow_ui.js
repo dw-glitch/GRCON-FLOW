@@ -59,15 +59,18 @@
   // ---------------------------------------------------------------------------
   // Vocabulário da operação
   // ---------------------------------------------------------------------------
-  const CLASSIFICACOES = {
-    PRONTO: { rotulo: "Pronto", classe: "pronto" },
-    VALIDAR: { rotulo: "Validar", classe: "validar" },
-    NAO_LOCALIZADO: { rotulo: "Não localizado", classe: "nao-localizado" },
-    ACAO_NECESSARIA: { rotulo: "Ação necessária", classe: "acao" },
-    IDENTIFICACAO_PENDENTE: { rotulo: "Identificação pendente", classe: "pendente" },
-    POSSIVEIS_CORRESPONDENCIAS: { rotulo: "Possíveis correspondências", classe: "candidatos" },
-    TRIAGEM_NAO_APLICAVEL: { rotulo: "Triagem não aplicável", classe: "neutro" },
-  };
+  // O rótulo responde primeiro à pergunta operacional mais importante — este
+  // documento é novo ou já existe na LD? — e só depois ao detalhe. Quem lê o
+  // painel decide a próxima ação sem abrir o item.
+  const CLASSIFICACOES = Object.freeze({
+    PRONTO: Object.freeze({ rotulo: "JÁ EXISTE · alocado", classe: "pronto" }),
+    VALIDAR: Object.freeze({ rotulo: "JÁ EXISTE · validar divergência", classe: "validar" }),
+    NAO_LOCALIZADO: Object.freeze({ rotulo: "NOVO · não consta nas LDs", classe: "nao-localizado" }),
+    ACAO_NECESSARIA: Object.freeze({ rotulo: "JÁ EXISTE · sem alocação", classe: "acao" }),
+    IDENTIFICACAO_PENDENTE: Object.freeze({ rotulo: "PENDENTE · identificar código", classe: "pendente" }),
+    POSSIVEIS_CORRESPONDENCIAS: Object.freeze({ rotulo: "POSSÍVEL EXISTENTE · confirmar", classe: "candidatos" }),
+    TRIAGEM_NAO_APLICAVEL: Object.freeze({ rotulo: "Triagem não aplicável", classe: "neutro" }),
+  });
 
   const STATUS = {
     rascunho: "Rascunho",
@@ -221,10 +224,16 @@
       elemento("span", { class: "flow-topbar-spacer" }),
       nav,
       elemento("div", { class: "flow-user" }, [
-        elemento("span", { class: "flow-user-chip", "aria-hidden": "true", text: iniciais(perfil.full_name || perfil.email) }),
-        elemento("span", { class: "flow-user-info" }, [
-          elemento("strong", { text: texto(perfil.full_name) || texto(perfil.email) || "Usuário" }),
-          elemento("span", { text: rotuloPapel(perfil.role) }),
+        elemento("button", {
+          class: "flow-user-botao", type: "button", title: "Meu perfil",
+          "aria-label": `Meu perfil — ${texto(perfil.full_name) || texto(perfil.email) || "usuário"}`,
+          onclick: abrirPerfil,
+        }, [
+          elemento("span", { class: "flow-user-chip", "aria-hidden": "true", text: iniciais(perfil.full_name || perfil.email) }),
+          elemento("span", { class: "flow-user-info" }, [
+            elemento("strong", { text: texto(perfil.full_name) || texto(perfil.email) || "Usuário" }),
+            elemento("span", { text: rotuloPapel(perfil.role) }),
+          ]),
         ]),
         elemento("button", {
           class: "text-button", type: "button", text: "Sair",
@@ -282,12 +291,164 @@
     return root.confirm(mensagem);
   }
 
+  // ---------------------------------------------------------------------------
+  // Caixa modal
+  //
+  // Para formulários curtos que não valem uma troca de tela. Devolve o foco de
+  // onde veio e prende o Tab dentro do diálogo: quem navega por teclado não
+  // pode ser largado numa página que continua visível atrás da caixa.
+  // ---------------------------------------------------------------------------
+  function abrirModal({ titulo, descricao = "", montarCorpo, montarAcoes = null } = {}) {
+    const anterior = doc.activeElement;
+    const fundo = elemento("div", { class: "flow-modal" });
+    const painel = elemento("div", {
+      class: "flow-modal-painel", role: "dialog", "aria-modal": "true", "aria-label": texto(titulo),
+    });
+
+    function focaveis() {
+      return $$("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])", painel)
+        .filter((node) => !node.hidden && node.offsetParent !== null);
+    }
+
+    function aoTeclar(evento) {
+      if (evento.key === "Escape") { evento.preventDefault(); fechar(); return; }
+      if (evento.key !== "Tab") return;
+      const lista = focaveis();
+      if (!lista.length) return;
+      const primeiro = lista[0];
+      const ultimo = lista[lista.length - 1];
+      if (evento.shiftKey && doc.activeElement === primeiro) { evento.preventDefault(); ultimo.focus(); }
+      else if (!evento.shiftKey && doc.activeElement === ultimo) { evento.preventDefault(); primeiro.focus(); }
+    }
+
+    function fechar() {
+      doc.removeEventListener("keydown", aoTeclar, true);
+      fundo.remove();
+      doc.body.classList.remove("p1-modal-open");
+      if (anterior && typeof anterior.focus === "function") anterior.focus();
+    }
+
+    // `append` converte null no texto "null"; só `elemento` filtra por conta
+    // própria. Aqui a lista é montada antes e limpa na mão.
+    painel.append(...[
+      elemento("div", { class: "flow-modal-head" }, [
+        elemento("div", { style: "flex:1;min-width:0" }, [
+          elemento("h2", { text: texto(titulo) }),
+          descricao ? elemento("p", { text: descricao }) : null,
+        ]),
+        elemento("button", { class: "text-button", type: "button", text: "Fechar", onclick: fechar }),
+      ]),
+      elemento("div", { class: "flow-modal-corpo" }, montarCorpo ? montarCorpo(fechar) : []),
+      montarAcoes ? elemento("div", { class: "flow-modal-acoes" }, montarAcoes(fechar)) : null,
+    ].filter(Boolean));
+
+    fundo.append(painel);
+    fundo.addEventListener("click", (evento) => { if (evento.target === fundo) fechar(); });
+    doc.addEventListener("keydown", aoTeclar, true);
+    doc.body.append(fundo);
+    doc.body.classList.add("p1-modal-open");
+    const inicial = focaveis().find((node) => node.tagName !== "BUTTON") || focaveis()[0];
+    if (inicial) inicial.focus();
+    return { fechar, painel };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Meu perfil
+  //
+  // O formulário de solicitação já vinha preenchido com o nome do perfil, mas
+  // não havia onde corrigi-lo: quem entrou com o nome errado o reescrevia a cada
+  // pedido. A troca de senha mora aqui pelo mesmo motivo — quem lembra da senha
+  // atual não deveria precisar do fluxo de "esqueci".
+  // ---------------------------------------------------------------------------
+  /** Sincroniza a barra do topo com o perfil recém-salvo. */
+  function atualizarTopoComPerfil() {
+    const perfil = (root.FlowApi.auth.profile) || {};
+    const nome = texto(perfil.full_name) || texto(perfil.email) || "Usuário";
+    const chip = $(".flow-user-botao .flow-user-chip");
+    if (chip) chip.textContent = iniciais(perfil.full_name || perfil.email);
+    const rotulo = $(".flow-user-botao .flow-user-info strong");
+    if (rotulo) rotulo.textContent = nome;
+    const botao = $(".flow-user-botao");
+    if (botao) botao.setAttribute("aria-label", `Meu perfil — ${nome}`);
+  }
+
+  function abrirPerfil() {
+    const Api = root.FlowApi;
+    const perfil = Api.auth.profile || {};
+
+    const campo = (id, rotulo, valor, { tipo = "text", ajuda = "", autocomplete = "off" } = {}) => {
+      const entrada = elemento("input", { id, type: tipo, autocomplete });
+      entrada.value = texto(valor);
+      return {
+        entrada,
+        node: elemento("label", { class: "flow-campo", for: id }, [
+          elemento("span", { text: rotulo }),
+          ajuda ? elemento("small", { text: ajuda }) : null,
+          entrada,
+        ]),
+      };
+    };
+
+    const nome = campo("perfil-nome", "Nome completo", perfil.full_name, { autocomplete: "name" });
+    const area = campo("perfil-area", "Área / setor", perfil.area);
+    const contato = campo("perfil-contato", "Contato", perfil.contact || perfil.email, {
+      ajuda: "E-mail ou ramal usado para retorno das solicitações.",
+    });
+    const senha = campo("perfil-senha", "Nova senha", "", { tipo: "password", autocomplete: "new-password", ajuda: "Mínimo de 6 caracteres. Deixe vazio para não trocar." });
+
+    const salvarDados = elemento("button", { class: "primary-button", type: "button", text: "Salvar dados" });
+    const salvarSenha = elemento("button", { class: "secondary-button", type: "button", text: "Trocar senha" });
+
+    salvarDados.addEventListener("click", async () => {
+      if (!texto(nome.entrada.value)) { avisar("Informe seu nome.", "erro"); nome.entrada.focus(); return; }
+      salvarDados.disabled = true;
+      salvarDados.textContent = "Salvando…";
+      const { error } = await Api.auth.atualizarPerfil({
+        full_name: nome.entrada.value, area: area.entrada.value, contact: contato.entrada.value,
+      });
+      salvarDados.disabled = false;
+      salvarDados.textContent = "Salvar dados";
+      if (error) { avisar(error, "erro"); return; }
+      avisar("Perfil atualizado.", "ok");
+      // A barra do topo mostra nome e iniciais: atualizamos no lugar em vez de
+      // recarregar a página, que jogaria fora um pedido em preenchimento.
+      atualizarTopoComPerfil();
+    });
+
+    salvarSenha.addEventListener("click", async () => {
+      const nova = senha.entrada.value;
+      if (nova.length < 6) { avisar("A senha precisa ter pelo menos 6 caracteres.", "erro"); senha.entrada.focus(); return; }
+      salvarSenha.disabled = true;
+      salvarSenha.textContent = "Trocando…";
+      const { error } = await Api.auth.definirSenha(nova);
+      salvarSenha.disabled = false;
+      salvarSenha.textContent = "Trocar senha";
+      if (error) { avisar(error, "erro"); return; }
+      senha.entrada.value = "";
+      avisar("Senha alterada.", "ok");
+    });
+
+    return abrirModal({
+      titulo: "Meu perfil",
+      descricao: `${texto(perfil.email) || "—"} · ${rotuloPapel(perfil.role)}`,
+      montarCorpo: () => [
+        elemento("div", { class: "flow-grid" }, [nome.node, area.node, contato.node]),
+        elemento("div", { class: "flow-acoes" }, [salvarDados]),
+        elemento("hr", { style: "border:none;border-top:1px solid var(--border-1);margin:.4rem 0" }),
+        elemento("div", { class: "flow-grid" }, [senha.node]),
+        elemento("div", { class: "flow-acoes" }, [salvarSenha]),
+        elemento("p", { style: "margin:0;font-size:.76rem;color:var(--text-3)", text:
+          "O e-mail e o papel não são editáveis aqui: o e-mail identifica a conta e o papel é atribuído em Painel → Usuários." }),
+      ],
+    });
+  }
+
   root.FlowUi = Object.freeze({
     $, $$, elemento, esc, texto,
     CLASSIFICACOES, STATUS, PAPEIS,
     rotuloStatus, rotuloPapel, seloClassificacao, seloStatus, seloPrazo, situacaoPrazo,
     data, dataHora, iniciais,
-    avisar, carregando, vazio, confirmar, avisoDaUrl,
+    avisar, carregando, vazio, confirmar, avisoDaUrl, abrirModal, abrirPerfil,
     montarTopo, montarRodape, exigirSessao,
   });
 })(window);

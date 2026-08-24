@@ -18,7 +18,7 @@ próprios. Nenhuma tabela, chave ou URL do GRCON principal é usada.
 
 ```
 Solicitante → escolhe o serviço → formulário se adapta → envia
-     └── pode anexar PDF, Excel e Word
+     └── pode anexar PDF, Excel, Word e DWG
      ↓
 Solicitação REGISTRADA SEMPRE + protocolo FLOW-AAAA-NNNNNN
      ↓
@@ -72,11 +72,11 @@ a divergência é mostrada para alguém decidir.
 **Reprocessar não apaga.** Cada triagem é uma execução nova, registrada com a
 versão de LD que usou. A análise anterior permanece.
 
-**Anexos ficam privados.** Todo tipo de solicitação aceita vários arquivos PDF,
-Excel (`.xls`, `.xlsx`, `.xlsm`) e Word (`.doc`, `.docx`), com até 10 MB por
-arquivo. O solicitante vê o resultado de cada envio e pode tentar novamente se
-algum falhar. A equipe baixa o arquivo original na ficha da solicitação por um
-link temporário; o bucket não é público.
+**Anexos ficam privados.** Todo tipo de solicitação aceita até 30 arquivos em
+PDF, Excel (`.xls`, `.xlsx`, `.xlsm`), Word (`.doc`, `.docx`) e DWG, com até
+10 MB por arquivo. O solicitante vê o resultado de cada envio e pode tentar
+novamente se algum falhar. A equipe baixa o arquivo original na ficha da
+solicitação por um link temporário; o bucket não é público.
 
 **Exclusão é administrativa e permanente.** Administrador e proprietário podem
 excluir uma solicitação pela ficha do painel. O aplicativo exige digitar o
@@ -198,6 +198,13 @@ recriar o cadastro. Tirar da lista impede um cadastro novo com aquele papel, mas
 Promover ou rebaixar em Usuários mantém a lista em dia automaticamente, para as
 duas telas nunca discordarem.
 
+**Cada um cuida do próprio cadastro.** O nome no alto da tela abre **Meu
+perfil**, onde a pessoa corrige nome, área e contato — os mesmos campos que o
+formulário de solicitação já traz preenchidos — e troca a senha sem passar pelo
+"esqueci minha senha". Quem usa o link de recuperação por e-mail cai numa tela
+que pede a nova senha antes de seguir; e-mail e papel continuam sendo do
+administrador.
+
 O primeiro proprietário não é mais escolhido por corrida de cadastro. Antes de
 abrir o aplicativo, seu e-mail precisa ser preparado uma única vez no bootstrap
 seguro; somente esse endereço poderá criar a conta proprietária inicial.
@@ -266,7 +273,7 @@ não há dependência de CDN em runtime.
 | --- | --- |
 | `flow_api.js` | Toda a conversa com o banco. As telas não montam consulta. |
 | `flow_docs.js` | Normalização de código, leitura de LD, extração de arquivos. |
-| `flow_ui.js` | Barra do topo, guarda de rota, selos, avisos, formatação. |
+| `flow_ui.js` | Barra do topo, guarda de rota, selos, avisos, formatação, modal e perfil. |
 | `flow_solicitar.js` | Portal do solicitante e formulário dinâmico. |
 | `flow_painel.js` | Painel, ficha, itens, triagem, comentários, histórico. |
 | `flow_ld.js` | Base Documental: upload, indexação e versionamento. |
@@ -286,7 +293,7 @@ da configuração do GRCON principal na hospedagem.
 | `FLOW_SUPABASE_URL` | Apontar para outro projeto (homologação, por exemplo). |
 | `FLOW_SUPABASE_ANON_KEY` | A chave **publicável** do projeto. |
 | `FLOW_UPLOAD_MAX_MB` | Tamanho máximo de cada anexo (padrão 10). |
-| `FLOW_UPLOAD_MAX_FILES` | Quantidade máxima de anexos por solicitação (padrão 5; o banco também limita em 5). |
+| `FLOW_UPLOAD_MAX_FILES` | Quantidade máxima de anexos por solicitação (padrão 30, o mesmo teto do banco). |
 | `FLOW_STORAGE_QUOTA_MB` | Cota usada pela barra do painel (padrão 1024 MB no plano Free). |
 | `FLOW_LD_UPLOAD_MAX_MB` | Tamanho máximo do arquivo de LD (padrão 100). |
 

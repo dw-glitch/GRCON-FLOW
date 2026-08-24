@@ -363,7 +363,7 @@ check("o encaminhamento espera o perfil carregar", () => {
   // /solicitar por um instante, e ela veria a tela errada piscar.
   const home = fs.readFileSync(path.join(root, "flow_home.js"), "utf8");
   assert.match(home, /Api\.auth\.session && Api\.auth\.profile/);
-  assert.match(home, /aoMudar\(\(sessao, perfil\) => \{\s*if \(sessao && perfil\) encaminhar\(\);/);
+  assert.match(home, /aoMudar\(\(sessao, perfil\) => \{[\s\S]*?if \(sessao && perfil\) encaminhar\(\);/);
 });
 
 check("uma rota protegida tem prioridade sobre o destino do papel", () => {
@@ -389,7 +389,7 @@ check("o aviso de área restrita sobrevive ao redirecionamento", () => {
 
 check("a aba Acesso é de administrador e existe de ponta a ponta", () => {
   const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
-  assert.match(painel, /\{ chave: "acesso", rotulo: "Acesso", admin: true \}/);
+  assert.match(painel, /\{ chave: "acesso", rotulo: "Acesso",[^}]*admin: true \}/);
   assert.match(painel, /montarAcesso\(conteudo\)/, "a aba precisa ser despachada");
   const admin = fs.readFileSync(path.join(root, "flow_admin.js"), "utf8");
   assert.match(admin, /montarTipos, montarUsuarios, montarAcesso/, "e exportada");
@@ -402,7 +402,7 @@ check("a aba Acesso é de administrador e existe de ponta a ponta", () => {
 
 check("normas e catálogos são administráveis e versionados", () => {
   const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
-  assert.match(painel, /\{ chave: "normas", rotulo: "Normas e códigos", admin: true \}/);
+  assert.match(painel, /\{ chave: "normas", rotulo: "Normas e códigos",[^}]*admin: true \}/);
   assert.match(painel, /FlowNormas\.montar\(conteudo\)/);
   const pagina = fs.readFileSync(path.join(root, "painel.html"), "utf8");
   assert.match(pagina, /flow_normas\.js/);
@@ -514,14 +514,19 @@ check("o painel mantém uma caixa persistente de notificações não lidas", () 
     "avisos continuam sendo criados apenas pelo gatilho do banco");
 });
 
-check("todo tipo de solicitação aceita somente até cinco anexos PDF, Excel e Word de 10 MB", () => {
+check("todo tipo de solicitação aceita até trinta anexos PDF, Excel, Word e DWG de 10 MB", () => {
+  // O contrato do formulário é o mesmo do banco (migração flow_25). Quando as
+  // duas pontas discordam, o arquivo sobe e o registro é recusado — o pior dos
+  // dois mundos, porque o solicitante já acha que anexou.
   const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
-  ["pdf", "xls", "xlsx", "xlsm", "doc", "docx"].forEach((extensao) => {
+  ["pdf", "xls", "xlsx", "xlsm", "doc", "docx", "dwg"].forEach((extensao) => {
     assert.match(api, new RegExp(`EXTENSOES_ANEXO[^\\n]+[\"']${extensao}[\"']`),
       `falta suporte a .${extensao}`);
   });
   assert.match(api, /validarAnexo\(arquivo\)/, "a API precisa validar antes do upload");
-  assert.match(api, /MAXIMO_ANEXOS[^\n]+5/);
+  assert.match(api, /TETO_ANEXOS = 30/);
+  assert.match(api, /MAXIMO_ANEXOS = Math\.min\(TETO_ANEXOS/);
+  assert.match(api, /dwg: "application\/acad"/, "o MIME do DWG precisa ser um dos aceitos pelo bucket");
   assert.match(api, /config\.uploadMaxMb \|\| 10/);
   assert.match(api, /client\.rpc\("flow_register_attachment"/,
     "o navegador não deve inserir metadados sem as validações atômicas do banco");
@@ -532,7 +537,7 @@ check("todo tipo de solicitação aceita somente até cinco anexos PDF, Excel e 
     "anexos precisam aparecer mesmo em tipos que não usam documentos");
   assert.match(solicitar, /accept: Api\.anexos\.accept/);
   assert.match(solicitar, /estado\.anexos\.length \+ aceitos\.length >= maximo/,
-    "a seleção precisa parar no quinto arquivo");
+    "a seleção precisa parar no limite de arquivos");
   assert.match(solicitar, /Tentar anexos novamente/,
     "uma falha precisa ser visível e permitir nova tentativa");
   assert.doesNotMatch(solicitar, /anexo não enviado[^\n]+console\.warn/,
@@ -541,7 +546,11 @@ check("todo tipo de solicitação aceita somente até cinco anexos PDF, Excel e 
   assert.match(migration, /public = false/);
   assert.match(migration, /file_size_limit = 10485760/);
   assert.match(migration, /macroenabled\.12/i, "o bucket precisa aceitar Excel com macro");
-  assert.match(migration, /Limite de 5 anexos por solicitação atingido/);
+  const limites = fs.readFileSync(path.join(root, "database/migrations/flow_25_triage_requester_dwg_limits.sql"), "utf8");
+  assert.match(limites, /Limite de 30 anexos complementares por solicitação/,
+    "o teto do banco é o mesmo anunciado na tela");
+  assert.match(limites, /'pdf','xls','xlsx','xlsm','doc','docx','dwg'/,
+    "as extensões do banco e da tela precisam coincidir");
   assert.match(migration, /for update/i, "uploads simultâneos precisam ser serializados por solicitação");
   assert.match(migration, /revoke insert, update, delete/i,
     "metadados não podem contornar o RPC validado");
@@ -611,6 +620,126 @@ check("a configuração publicada não carrega chave secreta", () => {
   assert.doesNotMatch(config, /service_role/, "service_role ignora a RLS e não pode ser publicada");
   assert.match(config, /supabaseUrl/);
   assert.match(config, /https:\/\/[a-z0-9]+\.supabase\.co/);
+});
+
+// ── O que já foi digitado não se perde ─────────────────────────────────────
+
+check("acrescentar documento ou anexo não apaga o formulário já preenchido", () => {
+  // Cada `render()` reconstrói a etapa 2 a partir do estado. Se o que está na
+  // tela não for copiado para lá antes, adicionar um documento devolve o nome do
+  // perfil por cima do que a pessoa acabou de escrever.
+  const solicitar = fs.readFileSync(path.join(root, "flow_solicitar.js"), "utf8");
+  assert.match(solicitar, /if \(estado\.etapa === 2\) guardarFormulario\(\);/,
+    "render precisa capturar o formulário antes de redesenhar");
+  assert.match(solicitar, /function guardarFormulario\(\) \{\s*\n\s*if \(!estado\.tipo \|\| !document\.getElementById\("sol-nome"\)\) return;/,
+    "e não pode explodir quando o formulário ainda não está na tela");
+  assert.match(solicitar, /const foco = marcarFoco\(\);[\s\S]*?devolverFoco\(foco\);/,
+    "o cursor precisa voltar para onde estava depois do redesenho");
+});
+
+// ── Recuperação de senha ───────────────────────────────────────────────────
+
+check("o link de recuperação leva a uma tela de nova senha", () => {
+  // Sem esta parada, o link autenticava a pessoa e o roteador a mandava adiante
+  // com a senha antiga: um "entrar" disfarçado de "recuperar".
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /type=recovery/, "o rastro precisa ser lido antes de createClient limpar a URL");
+  assert.match(api, /evento === "PASSWORD_RECOVERY"/, "o evento do supabase-js também marca a recuperação");
+  assert.match(api, /get recuperandoSenha\(\)/);
+
+  const home = fs.readFileSync(path.join(root, "flow_home.js"), "utf8");
+  assert.match(home, /Api\.auth\.recuperandoSenha/);
+  assert.match(home, /render\("redefinir"\)/);
+  assert.match(home, /Api\.auth\.definirSenha\(valorSenha\)/,
+    "a tela precisa mesmo trocar a senha, não só existir");
+  assert.match(home, /Api\.auth\.concluiuRecuperacao\(\)/);
+});
+
+// ── Perfil ─────────────────────────────────────────────────────────────────
+
+check("cada pessoa corrige os próprios dados sem depender do administrador", () => {
+  const ui = fs.readFileSync(path.join(root, "flow_ui.js"), "utf8");
+  assert.match(ui, /function abrirPerfil/);
+  assert.match(ui, /Api\.auth\.atualizarPerfil\(\{/, "o perfil precisa ser gravado de fato");
+  assert.match(ui, /Api\.auth\.definirSenha\(nova\)/);
+  assert.match(ui, /class: "flow-user-botao"/, "o acesso fica no nome, na barra do topo");
+  assert.match(ui, /abrirModal, abrirPerfil/, "e é exportado para as três telas");
+
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /client\.rpc\("flow_update_my_profile"/);
+  const migration = fs.readFileSync(path.join(root, "database/migrations/flow_14_secure_owner_and_permissions.sql"), "utf8");
+  assert.match(migration, /function public\.flow_update_my_profile/,
+    "a tela só pode chamar o que existe no banco");
+});
+
+check("a caixa modal devolve o foco e prende o Tab", () => {
+  const ui = fs.readFileSync(path.join(root, "flow_ui.js"), "utf8");
+  assert.match(ui, /const anterior = doc\.activeElement;/);
+  assert.match(ui, /anterior\.focus\(\)/, "fechar precisa devolver o foco de onde veio");
+  assert.match(ui, /evento\.key !== "Tab"/, "o Tab não pode escapar para a página de trás");
+  assert.match(ui, /p1-modal-open/, "a página de trás não rola junto");
+});
+
+// ── Painel ─────────────────────────────────────────────────────────────────
+
+check("a aba do painel vive no endereço e o título acompanha", () => {
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /function abaDaUrl/);
+  assert.match(painel, /conhecida\.admin && !Api\.auth\.ehAdmin\(\)/,
+    "uma aba de administrador no endereço não pode abrir para operador");
+  assert.match(painel, /history\.(pushState|replaceState)/);
+  assert.match(painel, /addEventListener\("popstate"/, "voltar pelo navegador precisa funcionar");
+  assert.match(painel, /id: "painel-titulo"/);
+});
+
+check("alteração em lote vai até o fim e diz o que falhou", () => {
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /falhas\.push\(\{ id, erro: erroDoItem \}\)/,
+    "o primeiro erro não pode abortar o restante em silêncio");
+  assert.match(painel, /estado\.selecionadas = new Set\(falhas\.map/,
+    "o que falhou continua selecionado para a próxima tentativa");
+  assert.match(painel, /botao\.disabled = true;/, "o botão trava enquanto o lote roda");
+  assert.match(painel, /Aplicando \$\{indice \+ 1\} de/, "o progresso precisa ser visível");
+});
+
+check("a ficha trava o botão enquanto salva e devolve o foco ao fechar", () => {
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /botaoSalvar\.disabled = true;/,
+    "duplo clique não pode gravar a mesma alteração duas vezes");
+  assert.match(painel, /function fecharGaveta/);
+  assert.match(painel, /focoAntesDaFicha/, "fechar a ficha devolve o foco ao protocolo que a abriu");
+  assert.match(painel, /document\.body\.classList\.add\("p1-modal-open"\)/);
+});
+
+check("a lista do painel diz quando está mostrando só um pedaço", () => {
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /LIMITE_DA_LISTA = 300/);
+  assert.match(painel, /estado\.listaTruncada/);
+  assert.match(painel, /mostrando as \$\{LIMITE_DA_LISTA\} mais recentes/);
+});
+
+check("o solicitante abre o próprio pedido sem copiar o protocolo à mão", () => {
+  const acompanhar = fs.readFileSync(path.join(root, "flow_acompanhar.js"), "utf8");
+  assert.match(acompanhar, /class: "flow-protocolo-link"/);
+  assert.match(acompanhar, /const abrirProtocolo = \(protocolo\) =>/);
+  assert.match(acompanhar, /cartaoSolicitacao\(solicitacao, abrirProtocolo\)/);
+});
+
+// ── Ajustes operacionais moram nos módulos, não num remendo ────────────────
+
+check("não há patch de runtime remendando a API e o DOM depois de carregados", () => {
+  // O arquivo antigo trocava métodos de FlowApi e reescrevia textos da tela por
+  // regex, num MutationObserver permanente sobre o documento inteiro. As regras
+  // que ele carregava agora nascem nos próprios módulos.
+  assert.equal(fs.existsSync(path.join(root, "flow_runtime_patch.js")), false);
+  ["solicitar.html", "painel.html", "index.html", "acompanhar.html"].forEach((pagina) => {
+    const html = fs.readFileSync(path.join(root, pagina), "utf8");
+    assert.doesNotMatch(html, /flow_runtime_patch/, `${pagina} ainda carrega o remendo`);
+  });
+  const ui = fs.readFileSync(path.join(root, "flow_ui.js"), "utf8");
+  assert.match(ui, /rotulo: "JÁ EXISTE · alocado"/, "o vocabulário do painel é do módulo");
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /triadasNoServidor/, "a triagem já feita no banco não se repete pela tela");
 });
 
 console.log(JSON.stringify({ app: "GRCON Flow", passou: true, testes: checks.length, nomes: checks }, null, 2));

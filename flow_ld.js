@@ -37,6 +37,12 @@
   // ---------------------------------------------------------------------------
   // Envio de uma revisão
   // ---------------------------------------------------------------------------
+  function impedirSaida(evento) {
+    evento.preventDefault();
+    evento.returnValue = "";
+    return "";
+  }
+
   async function enviarRevisao(ld, arquivo, revisao, analise, progresso) {
     const limite = (Api.config.ldUploadMaxMb || 100) * 1024 * 1024;
     if (arquivo.size > limite) {
@@ -125,6 +131,10 @@
         if (estado.enviando) return;
         estado.enviando = true;
         publicar.disabled = true;
+        // Indexar uma LD são dezenas de lotes. Fechar a aba no meio deixa a
+        // versão parada em "processando", sem ninguém para retomá-la — por isso
+        // o navegador pergunta antes de deixar a página.
+        root.addEventListener("beforeunload", impedirSaida);
         try {
           const resultado = await enviarRevisao(ld, arquivo, revisao.value, analise, progresso);
           avisar(`${ld.code} atualizada: ${resultado.documentos.toLocaleString("pt-BR")} documentos indexados.`, "ok");
@@ -133,6 +143,7 @@
           progresso(erro.message || "Falhou.", 100);
           avisar(erro.message || "Não foi possível atualizar a LD.", "erro");
         } finally {
+          root.removeEventListener("beforeunload", impedirSaida);
           estado.enviando = false;
           validarPublicacao();
         }

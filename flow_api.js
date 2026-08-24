@@ -16,11 +16,19 @@
     console.error("[GRCON Flow] flow_config.js não foi carregado. Rode `npm run build`.");
   }
 
+  // O link de "esqueci minha senha" chega com `type=recovery` no fragmento, e o
+  // supabase-js limpa a URL assim que troca o token por sessão. A leitura tem
+  // que acontecer antes de `createClient` — depois dele, o rastro já pode ter
+  // sumido e a tela mandaria a pessoa adiante ainda com a senha antiga.
+  const CHEGOU_POR_RECUPERACAO = /(^|[#&?])type=recovery([&]|$)/.test(
+    `${root.location.hash || ""}${root.location.search || ""}`
+  );
+
   const client = root.supabase.createClient(config.supabaseUrl, config.supabaseKey, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
   });
 
-  const state = { session: null, profile: null };
+  const state = { session: null, profile: null, recuperacao: CHEGOU_POR_RECUPERACAO };
   const ouvintes = new Set();
 
   function texto(valor) {
@@ -30,9 +38,12 @@
   // O bucket continua privado; esta lista define o contrato do formulário.
   // A extensão é a fonte mais estável aqui porque alguns navegadores não
   // informam o MIME de arquivos do Office (ou informam application/octet-stream).
-  const EXTENSOES_ANEXO = Object.freeze(["pdf", "xls", "xlsx", "xlsm", "doc", "docx"]);
+  // Os mesmos limites valem no banco e no bucket (migração flow_25).
+  const EXTENSOES_ANEXO = Object.freeze(["pdf", "xls", "xlsx", "xlsm", "doc", "docx", "dwg"]);
   const ACEITE_ANEXO = EXTENSOES_ANEXO.map((extensao) => `.${extensao}`).join(",");
-  const MAXIMO_ANEXOS = Math.min(5, Math.max(1, Number(config.uploadMaxFiles) || 5));
+  const TETO_ANEXOS = 30;
+  const MAXIMO_ANEXOS = Math.min(TETO_ANEXOS, Math.max(1, Number(config.uploadMaxFiles) || TETO_ANEXOS));
+  const FORMATOS_ANEXO = "PDF, Excel, Word ou DWG";
   const MIME_ANEXO = Object.freeze({
     pdf: "application/pdf",
     xls: "application/vnd.ms-excel",
@@ -40,6 +51,7 @@
     xlsm: "application/vnd.ms-excel.sheet.macroenabled.12",
     doc: "application/msword",
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    dwg: "application/acad",
   });
 
   function extensaoDoAnexo(arquivo) {
@@ -50,7 +62,7 @@
     if (!arquivo || !texto(arquivo.name)) return "Escolha um arquivo válido.";
     const extensao = extensaoDoAnexo(arquivo);
     if (!EXTENSOES_ANEXO.includes(extensao)) {
-      return `“${arquivo.name}” não é PDF, Excel ou Word.`;
+      return `“${arquivo.name}” não é ${FORMATOS_ANEXO}.`;
     }
     if (!Number(arquivo.size)) return `“${arquivo.name}” está vazio.`;
     const limiteMb = config.uploadMaxMb || 10;
@@ -74,13 +86,17 @@
     if (/User already registered/i.test(bruto)) return "Este e-mail já tem cadastro. Faça login.";
     if (/Password should be at least/i.test(bruto)) return "A senha precisa ter pelo menos 6 caracteres.";
     if (/LI\/MC.*N-1710|PDF e o Excel|PDF \+ Excel|PDF obrigatório|Excel obrigatório/i.test(bruto)) return bruto;
-    if (/Limite de 5 anexos complementares/i.test(bruto)) return "Esta solicitação já tem o limite de 5 anexos complementares.";
-    if (/Limite de 5 anexos/i.test(bruto)) return "Esta solicitação já tem o limite de 5 anexos.";
-    if (/flow_attachments_(extension|mime)_valid|mime type|formato de anexo/i.test(bruto)) {
-      return "Envie somente arquivos PDF, Word ou Excel.";
+    if (/Limite de \d+ anexos complementares/i.test(bruto)) {
+      return `Esta solicitação já tem o limite de ${MAXIMO_ANEXOS} anexos complementares.`;
     }
-    if (/flow_attachments_size_valid|maximum allowed size|mais de 10 MB/i.test(bruto)) {
-      return "Cada anexo pode ter no máximo 10 MB.";
+    if (/Limite de \d+ anexos/i.test(bruto)) {
+      return `Esta solicitação já tem o limite de ${MAXIMO_ANEXOS} anexos.`;
+    }
+    if (/flow_attachments_(extension|mime)_valid|mime type|formato de anexo/i.test(bruto)) {
+      return `Envie somente arquivos ${FORMATOS_ANEXO}.`;
+    }
+    if (/flow_attachments_size_valid|maximum allowed size|mais de \d+ MB/i.test(bruto)) {
+      return `Cada anexo pode ter no máximo ${config.uploadMaxMb || 10} MB.`;
     }
     if (/row-level security|permission denied|Sem permissão/i.test(bruto)) {
       return bruto.includes("Sem permissão") ? bruto : "Seu perfil não tem permissão para esta ação.";
@@ -133,6 +149,10 @@
     get user() { return state.session ? state.session.user : null; },
     get role() { return state.profile ? state.profile.role : null; },
 
+    /** Verdadeiro entre a chegada pelo link de recuperação e a troca da senha. */
+    get recuperandoSenha() { return state.recuperacao; },
+    concluiuRecuperacao() { state.recuperacao = false; },
+
     ehEquipe() { return ["operador", "administrador", "proprietario"].includes(auth.role); },
     ehAdmin() { return ["administrador", "proprietario"].includes(auth.role); },
     ehProprietario() { return auth.role === "proprietario"; },
@@ -143,7 +163,8 @@
       const { data } = await client.auth.getSession();
       state.session = data ? data.session : null;
       await carregarPerfil();
-      client.auth.onAuthStateChange(async (_evento, sessao) => {
+      client.auth.onAuthStateChange(async (evento, sessao) => {
+        if (evento === "PASSWORD_RECOVERY") state.recuperacao = true;
         state.session = sessao;
         await carregarPerfil();
         avisar();
@@ -185,6 +206,7 @@
 
     async definirSenha(nova) {
       const { error } = await chamar(client.auth.updateUser({ password: nova }), "definir senha");
+      if (!error) state.recuperacao = false;
       return { error };
     },
 
@@ -192,6 +214,7 @@
       await client.auth.signOut();
       state.session = null;
       state.profile = null;
+      state.recuperacao = false;
       avisar();
     },
 
@@ -282,13 +305,20 @@
   // ---------------------------------------------------------------------------
   // Solicitações
   // ---------------------------------------------------------------------------
+
+  // O banco já tria no ato da criação (`flow_create_request` devolve
+  // `triage_completed`). A tela pede a triagem logo em seguida, por hábito do
+  // fluxo antigo; guardamos o id para pular só essa repetição imediata.
+  // Reprocessamento manual pelo painel continua executando sempre.
+  const triadasNoServidor = new Set();
+
   const solicitacoes = {
     /**
      * Registra a solicitação. O protocolo é gerado pelo banco, numa operação
      * atômica: dois envios simultâneos nunca recebem o mesmo número.
      */
     async criar(dados) {
-      return chamar(
+      const retorno = await chamar(
         client.rpc("flow_create_request", {
           p_type_code: dados.tipo,
           p_requester_name: texto(dados.nome),
@@ -301,6 +331,10 @@
         }),
         "registrar solicitação"
       );
+      if (retorno.data && retorno.data.triage_completed && retorno.data.id) {
+        triadasNoServidor.add(retorno.data.id);
+      }
+      return retorno;
     },
 
     async listar(filtros = {}) {
@@ -466,6 +500,10 @@
   const triagem = {
     /** Tria a solicitação inteira. Chamada logo após o envio. */
     async solicitacao(id) {
+      if (triadasNoServidor.has(id)) {
+        triadasNoServidor.delete(id);
+        return { data: { already_triaged: true }, error: null };
+      }
       return chamar(client.rpc("flow_triage_request", { target_request: id }), "executar triagem");
     },
     async item(id) {
@@ -689,6 +727,7 @@
     extensoes: EXTENSOES_ANEXO,
     accept: ACEITE_ANEXO,
     maximo: MAXIMO_ANEXOS,
+    formatos: FORMATOS_ANEXO,
     validar: validarAnexo,
 
     async enviar(requestId, arquivo, itemId = null) {

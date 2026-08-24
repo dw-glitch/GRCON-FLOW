@@ -43,6 +43,13 @@
   }
 
   .flow-user { display: flex; align-items: center; gap: .5rem; }
+  .flow-user-botao {
+    display: flex; align-items: center; gap: .5rem; min-width: 0; cursor: pointer;
+    padding: .25rem .4rem; border: 1px solid transparent; border-radius: var(--radius-sm);
+    background: none; color: inherit; text-align: left;
+  }
+  .flow-user-botao:hover { background: var(--surface-3); border-color: var(--border-1); }
+  .flow-user-botao:focus-visible { outline: none; box-shadow: var(--focus); }
   .flow-user-chip {
     display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 999px;
     background: var(--brand-700); color: #fff; font-size: .78rem; font-weight: 800;
@@ -169,6 +176,18 @@
   }
   .flow-erro-campo { font-size: .74rem; color: #a83f35; }
 
+  /* O olho fica dentro do campo, sobre a última coluna do input, para não
+     empurrar o rótulo nem ganhar uma linha só para ele. */
+  .flow-campo-senha { position: relative; }
+  .flow-campo-senha input { padding-right: 5.2rem; }
+  .flow-ver-senha {
+    position: absolute; right: .35rem; bottom: .35rem; min-height: 2rem; padding: .25rem .55rem;
+    border: none; background: none; cursor: pointer; border-radius: var(--radius-sm);
+    color: var(--brand-700); font-size: .76rem; font-weight: 650;
+  }
+  .flow-ver-senha:hover { background: var(--brand-50); }
+  .flow-ver-senha:focus-visible { outline: none; box-shadow: var(--focus); }
+
   /* ── Escolha do tipo ───────────────────────────────────────────────────── */
   .flow-tipos { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); }
   .flow-tipo {
@@ -239,6 +258,20 @@
     border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-1); font: inherit;
   }
   .flow-item-edicao input:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 1px; border-color: var(--brand-600); }
+  .flow-protocolo-link {
+    padding: 0; border: none; background: none; cursor: pointer;
+    font-family: var(--font-mono); font-weight: 700; font-size: .95rem;
+    color: var(--brand-800); text-decoration: underline; text-underline-offset: .18em;
+  }
+  .flow-protocolo-link:hover { color: var(--brand-600); }
+  .flow-protocolo-link:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--radius-sm); }
+
+  .flow-lista-resumo {
+    margin: 0 0 .55rem; font-size: .78rem; color: var(--text-3);
+  }
+  .flow-lista-resumo strong { color: var(--text-2); }
+  .flow-lote-andamento { font-size: .78rem; color: var(--text-3); }
+
   .flow-lote { margin-top: var(--space-3); padding: .7rem .8rem; border: 1px solid var(--border-1); border-radius: var(--radius-sm); background: var(--surface-2); }
   .flow-lote summary { cursor: pointer; font-weight: 650; color: var(--brand-700); margin-bottom: .55rem; }
 
@@ -343,6 +376,7 @@
     background: rgb(12 32 48 / 45%);
   }
   .flow-drawer[open], .flow-drawer.aberto { display: block; }
+  .flow-drawer-painel:focus-visible { outline: none; }
   .flow-drawer-painel {
     position: absolute; top: 0; right: 0; height: 100%; width: min(46rem, 100%);
     background: var(--surface-0); box-shadow: var(--shadow-2);
@@ -498,6 +532,28 @@
     display: inline-block; margin: .8rem 0; padding: .5rem 1.1rem; border-radius: var(--radius-sm);
     background: var(--brand-100); color: var(--brand-800);
     font-family: var(--font-mono); font-size: 1.15rem; font-weight: 700; letter-spacing: .02em;
+  }
+
+  /* ── Caixa modal ───────────────────────────────────────────────────────── */
+  .flow-modal {
+    position: fixed; inset: 0; z-index: 70; display: grid; place-items: center;
+    padding: 1.25rem; background: rgb(12 32 48 / 45%); overflow-y: auto;
+  }
+  .flow-modal-painel {
+    width: min(34rem, 100%); max-height: calc(100vh - 2.5rem); display: flex; flex-direction: column;
+    background: var(--surface-1); border: 1px solid var(--border-1);
+    border-radius: var(--radius-lg); box-shadow: var(--shadow-2);
+  }
+  .flow-modal-head {
+    display: flex; align-items: flex-start; gap: 1rem; padding: 1rem 1.15rem;
+    border-bottom: 1px solid var(--border-1);
+  }
+  .flow-modal-head h2 { margin: 0 0 .15rem; font-size: 1.05rem; color: var(--brand-strong); }
+  .flow-modal-head p { margin: 0; font-size: .78rem; color: var(--text-3); overflow-wrap: anywhere; }
+  .flow-modal-corpo { padding: 1.15rem; overflow-y: auto; display: grid; gap: .85rem; }
+  .flow-modal-acoes {
+    display: flex; gap: .5rem; flex-wrap: wrap; justify-content: flex-end;
+    padding: .85rem 1.15rem; border-top: 1px solid var(--border-1); background: var(--surface-2);
   }
 
   /* ── Abas internas do painel ───────────────────────────────────────────── */

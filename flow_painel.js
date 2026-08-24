@@ -20,6 +20,7 @@
     ? root.FlowExport.COLUNAS_PAINEL.map((coluna) =>
       coluna.header.charAt(0) + coluna.header.slice(1).toLocaleLowerCase("pt-BR"))
     : ["Protocolo", "Tipo", "Solicitante", "Recebida", "Responsável", "Progresso", "Status", "Prazo"]);
+  const LIMITE_DA_LISTA = 300;
   const INTERVALO_NOTIFICACOES_MS = 60000;
   const INTERVALO_ARMAZENAMENTO_MS = 30000;
   let pararObservacaoArmazenamento = null;
@@ -32,6 +33,7 @@
     solicitacoes: [],
     filtros: { busca: "", tipo: "", status: "", classificacao: "", indicador: "" },
     selecionadas: new Set(),
+    listaTruncada: false,
     aberta: null,
     carregando: false,
     notificacoes: [],
@@ -250,7 +252,7 @@
     if (corpo) Ui.carregando(corpo);
     estado.carregando = true;
 
-    const filtros = { limite: 300 };
+    const filtros = { limite: LIMITE_DA_LISTA };
     const f = estado.filtros;
     if (f.busca) filtros.busca = f.busca;
     if (f.tipo) filtros.tipo = f.tipo;
@@ -262,6 +264,9 @@
     estado.carregando = false;
     if (error) { avisar(error, "erro"); estado.solicitacoes = []; }
     else estado.solicitacoes = data || [];
+    // A consulta tem teto. Sem dizê-lo, a tabela cheia parece a lista inteira e
+    // quem procura uma solicitação antiga conclui que ela sumiu.
+    estado.listaTruncada = estado.solicitacoes.length >= LIMITE_DA_LISTA;
 
     // Atrasadas e "sem responsável" são recortes da lista já carregada: são
     // perguntas sobre o prazo e sobre a atribuição, não sobre outro conjunto.
@@ -294,17 +299,17 @@
       return;
     }
 
+    const todas = elemento("input", { type: "checkbox", "aria-label": "Selecionar todas" });
+    todas.checked = estado.solicitacoes.length > 0
+      && estado.solicitacoes.every((s) => estado.selecionadas.has(s.id));
+    todas.addEventListener("change", () => {
+      estado.selecionadas = todas.checked
+        ? new Set(estado.solicitacoes.map((s) => s.id)) : new Set();
+      desenharTabela();
+    });
+
     const cabecalho = elemento("tr", {}, [
-      elemento("th", { class: "col-check" }, [
-        elemento("input", {
-          type: "checkbox", "aria-label": "Selecionar todas",
-          onchange: (evento) => {
-            estado.selecionadas = evento.target.checked
-              ? new Set(estado.solicitacoes.map((s) => s.id)) : new Set();
-            desenharTabela();
-          },
-        }),
-      ]),
+      elemento("th", { class: "col-check" }, [todas]),
       ...COLUNAS_LISTA.map((rotulo) => elemento("th", { text: rotulo })),
     ]);
 
@@ -314,18 +319,23 @@
       const proporcao = solicitacao.items_total > 0
         ? Math.round((solicitacao.items_done / solicitacao.items_total) * 100) : 0;
 
-      corpo.append(elemento("tr", { class: estado.selecionadas.has(solicitacao.id) ? "selecionada" : "" }, [
-        elemento("td", {}, [
-          elemento("input", {
-            type: "checkbox", "aria-label": `Selecionar ${solicitacao.protocol}`,
-            checked: estado.selecionadas.has(solicitacao.id) || null,
-            onchange: (evento) => {
-              if (evento.target.checked) estado.selecionadas.add(solicitacao.id);
-              else estado.selecionadas.delete(solicitacao.id);
-              desenharTabela();
-            },
-          }),
-        ]),
+      const marcar = elemento("input", {
+        type: "checkbox", "aria-label": `Selecionar ${solicitacao.protocol}`,
+        checked: estado.selecionadas.has(solicitacao.id) || null,
+      });
+      // Marcar uma linha não redesenha a tabela: além de custar caro, tirava o
+      // foco da caixa e quebrava o Tab de quem seleciona várias em sequência.
+      marcar.addEventListener("change", () => {
+        if (marcar.checked) estado.selecionadas.add(solicitacao.id);
+        else estado.selecionadas.delete(solicitacao.id);
+        linha.classList.toggle("selecionada", marcar.checked);
+        todas.checked = estado.solicitacoes.length > 0
+          && estado.solicitacoes.every((s) => estado.selecionadas.has(s.id));
+        atualizarBarraDeLote();
+      });
+
+      const linha = elemento("tr", { class: estado.selecionadas.has(solicitacao.id) ? "selecionada" : "" }, [
+        elemento("td", {}, [marcar]),
         elemento("td", {}, [
           elemento("button", {
             class: "protocolo", type: "button", text: solicitacao.protocol,
@@ -349,15 +359,28 @@
         ]),
         elemento("td", {}, [seloStatus(solicitacao.status)]),
         elemento("td", {}, [seloPrazo(solicitacao.due_at, fechada)]),
-      ]));
+      ]);
+      corpo.append(linha);
     });
 
-    destino.replaceChildren(elemento("div", { class: "flow-tabela-wrap" }, [
-      elemento("table", { class: "flow-tabela" }, [
-        elemento("thead", {}, [cabecalho]), corpo,
+    destino.replaceChildren(
+      elemento("p", { class: "flow-lista-resumo" }, [
+        elemento("strong", { text: `${estado.solicitacoes.length} solicitação(ões)` }),
+        estado.listaTruncada
+          ? ` · mostrando as ${LIMITE_DA_LISTA} mais recentes desse recorte. Use a busca ou os filtros para alcançar as demais.`
+          : " nesse recorte.",
       ]),
-    ]));
+      elemento("div", { class: "flow-tabela-wrap" }, [
+        elemento("table", { class: "flow-tabela" }, [
+          elemento("thead", {}, [cabecalho]), corpo,
+        ]),
+      ])
+    );
 
+    atualizarBarraDeLote();
+  }
+
+  function atualizarBarraDeLote() {
     const barra = document.getElementById("painel-lote");
     if (barra) barra.hidden = estado.selecionadas.size === 0;
     const contagem = document.getElementById("painel-lote-contagem");
@@ -368,10 +391,9 @@
   // Ficha da solicitação
   // ---------------------------------------------------------------------------
   async function abrirFicha(id) {
-    const gaveta = document.getElementById("painel-drawer");
     const corpo = document.getElementById("painel-drawer-corpo");
     const titulo = document.getElementById("painel-drawer-titulo");
-    gaveta.classList.add("aberto");
+    abrirGaveta();
     Ui.carregando(corpo);
 
     const { data, error } = await Api.solicitacoes.obter(id);
@@ -498,6 +520,11 @@
     const resposta = elemento("textarea", { id: "acao-resposta", rows: "3", placeholder: "Resposta ao solicitante — o que ele vai ler ao acompanhar." });
     resposta.value = texto(solicitacao.answer);
 
+    const botaoSalvar = elemento("button", { class: "primary-button", type: "button", text: "Salvar" });
+    const botaoReprocessar = tipo && tipo.uses_ld
+      ? elemento("button", { class: "secondary-button", type: "button", text: "Reprocessar triagem" })
+      : null;
+
     const salvar = async () => {
       const alteracoes = [
         ["status", status.value, solicitacao.status],
@@ -507,9 +534,18 @@
       ].filter(([, novo, antigo]) => texto(novo) !== texto(antigo));
 
       if (!alteracoes.length) { avisar("Nada mudou."); return; }
+      // Sem travar o botão, um duplo clique dispara a mesma alteração duas vezes
+      // e o histórico ganha um evento que nunca aconteceu.
+      botaoSalvar.disabled = true;
+      botaoSalvar.textContent = "Salvando…";
       for (const [campo, valor] of alteracoes) {
         const { error } = await Api.solicitacoes.atualizar(solicitacao.id, campo, valor, "");
-        if (error) { avisar(error, "erro"); return; }
+        if (error) {
+          botaoSalvar.disabled = false;
+          botaoSalvar.textContent = "Salvar";
+          avisar(error, "erro");
+          return;
+        }
       }
       avisar("Solicitação atualizada.", "ok");
       abrirFicha(solicitacao.id);
@@ -519,12 +555,17 @@
 
     const reprocessar = async () => {
       if (!tipo || !tipo.uses_ld) { avisar("Este tipo não usa consulta às LDs."); return; }
+      if (botaoReprocessar) { botaoReprocessar.disabled = true; botaoReprocessar.textContent = "Reprocessando…"; }
       avisar("Reprocessando com as LDs vigentes…");
       const { error } = await Api.triagem.solicitacao(solicitacao.id);
+      if (botaoReprocessar) { botaoReprocessar.disabled = false; botaoReprocessar.textContent = "Reprocessar triagem"; }
       if (error) { avisar(error, "erro"); return; }
       avisar("Triagem reprocessada. O resultado anterior foi preservado no histórico.", "ok");
       abrirFicha(solicitacao.id);
     };
+
+    botaoSalvar.addEventListener("click", salvar);
+    if (botaoReprocessar) botaoReprocessar.addEventListener("click", reprocessar);
 
     const excluir = async (evento) => {
       const protocolo = texto(solicitacao.protocol).toUpperCase();
@@ -551,8 +592,7 @@
       }
 
       estado.selecionadas.delete(solicitacao.id);
-      estado.aberta = null;
-      document.getElementById("painel-drawer").classList.remove("aberto");
+      fecharGaveta();
       avisar(`${protocolo} excluída permanentemente.`, "ok");
       await carregarSolicitacoes();
       const indicadores = document.getElementById("painel-indicadores");
@@ -578,10 +618,8 @@
         ]),
       ]),
       elemento("div", { class: "flow-acoes", style: "margin-top:.9rem" }, [
-        elemento("button", { class: "primary-button", type: "button", text: "Salvar", onclick: salvar }),
-        tipo && tipo.uses_ld
-          ? elemento("button", { class: "secondary-button", type: "button", text: "Reprocessar triagem", onclick: reprocessar })
-          : null,
+        botaoSalvar,
+        botaoReprocessar,
         Api.auth.ehAdmin()
           ? elemento("button", { class: "danger-button", type: "button", text: "Excluir solicitação", onclick: excluir })
           : null,
@@ -629,10 +667,18 @@
           disabled: itens.some((item) => item.requires_pdf_excel_pair && !(item.pdf_attachment_ready && item.excel_attachment_ready)) || null,
           title: itens.some((item) => item.requires_pdf_excel_pair && !(item.pdf_attachment_ready && item.excel_attachment_ready))
             ? "Complete o PDF + Excel dos itens LI/MC antes de concluir." : "",
-          onclick: async () => {
+          onclick: async (evento) => {
             if (!Ui.confirmar("Marcar todos os itens desta solicitação como concluídos?")) return;
+            const botaoConcluir = evento.currentTarget;
+            botaoConcluir.disabled = true;
+            botaoConcluir.textContent = "Concluindo…";
             const { error } = await Api.itens.atualizar(itens.map((i) => i.id), "status", "concluido", "Concluído em lote pela ficha");
-            if (error) { avisar(error, "erro"); return; }
+            if (error) {
+              botaoConcluir.disabled = false;
+              botaoConcluir.textContent = "Concluir todos os itens";
+              avisar(error, "erro");
+              return;
+            }
             avisar("Itens concluídos.", "ok");
             abrirFicha(solicitacao.id);
             carregarSolicitacoes();
@@ -812,7 +858,8 @@
       elemento("div", { class: "flow-acoes", style: "margin-top:.9rem" }, [
         elemento("button", {
           class: "primary-button", type: "button", text: "Salvar item",
-          onclick: async () => {
+          onclick: async (evento) => {
+            const botaoItem = evento.currentTarget;
             const alteracoes = [
               ["status", status.value, item.status],
               ["owner_name", responsavel.value, item.owner_name],
@@ -827,9 +874,16 @@
               ["observations", observacoes.value, item.observations],
             ].filter(([, novo, antigo]) => texto(novo) !== texto(antigo));
             if (!alteracoes.length) { avisar("Nada mudou."); return; }
+            botaoItem.disabled = true;
+            botaoItem.textContent = "Salvando…";
             for (const [campo, valor] of alteracoes) {
               const { error } = await Api.itens.atualizar([item.id], campo, valor, "");
-              if (error) { avisar(error, "erro"); return; }
+              if (error) {
+                botaoItem.disabled = false;
+                botaoItem.textContent = "Salvar item";
+                avisar(error, "erro");
+                return;
+              }
             }
             avisar("Item atualizado.", "ok");
             abrirFicha(item.request_id);
@@ -1044,7 +1098,16 @@
     Object.entries(Ui.STATUS).forEach(([valor, rotulo]) => status.append(elemento("option", { value: valor, text: rotulo })));
 
     const responsavel = elemento("input", { id: "lote-responsavel", type: "text", placeholder: "Nome", autocomplete: "off" });
+    const andamento = elemento("span", { id: "painel-lote-andamento", class: "flow-lote-andamento", hidden: true, role: "status", "aria-live": "polite" });
+    const botao = elemento("button", { class: "secondary-button compact", type: "button", text: "Aplicar aos selecionados" });
 
+    /**
+     * Uma alteração em lote é uma chamada por solicitação. Antes, o primeiro
+     * erro abortava o restante em silêncio e a tela ainda dizia "0 selecionadas"
+     * — quem tentasse repetir não sabia o que já tinha sido aplicado. Agora o
+     * lote vai até o fim, conta o que passou, e mantém selecionado exatamente o
+     * que falhou.
+     */
     const aplicar = async () => {
       const ids = [...estado.selecionadas];
       if (!ids.length) return;
@@ -1052,48 +1115,110 @@
       if (status.value) tarefas.push(["status", status.value]);
       if (texto(responsavel.value)) tarefas.push(["owner_name", responsavel.value]);
       if (!tarefas.length) { avisar("Escolha o que aplicar.", "erro"); return; }
-      for (const id of ids) {
+
+      botao.disabled = true;
+      status.disabled = true;
+      responsavel.disabled = true;
+      andamento.hidden = false;
+
+      const falhas = [];
+      let concluidas = 0;
+      for (let indice = 0; indice < ids.length; indice += 1) {
+        const id = ids[indice];
+        andamento.textContent = `Aplicando ${indice + 1} de ${ids.length}…`;
+        let erroDoItem = null;
         for (const [campo, valor] of tarefas) {
           const { error } = await Api.solicitacoes.atualizar(id, campo, valor, "Alteração em lote pelo painel");
-          if (error) { avisar(error, "erro"); return; }
+          if (error) { erroDoItem = error; break; }
         }
+        if (erroDoItem) falhas.push({ id, erro: erroDoItem });
+        else concluidas += 1;
       }
-      avisar(`${ids.length} solicitação(ões) atualizada(s).`, "ok");
-      estado.selecionadas = new Set();
-      status.value = ""; responsavel.value = "";
+
+      botao.disabled = false;
+      status.disabled = false;
+      responsavel.disabled = false;
+      andamento.hidden = true;
+      andamento.textContent = "";
+
+      if (falhas.length) {
+        // O que falhou continua marcado: a próxima tentativa já vem no alvo.
+        estado.selecionadas = new Set(falhas.map((falha) => falha.id));
+        avisar(`${concluidas} atualizada(s), ${falhas.length} falharam: ${falhas[0].erro}`, "erro");
+      } else {
+        estado.selecionadas = new Set();
+        status.value = ""; responsavel.value = "";
+        avisar(`${concluidas} solicitação(ões) atualizada(s).`, "ok");
+      }
       carregarSolicitacoes();
       montarIndicadores(document.getElementById("painel-indicadores"));
     };
+
+    botao.addEventListener("click", aplicar);
 
     return elemento("div", { class: "flow-lote", id: "painel-lote", hidden: true }, [
       elemento("strong", { id: "painel-lote-contagem", text: "0 selecionada(s)" }),
       elemento("label", { class: "flow-campo", for: "lote-status" }, [elemento("span", { text: "Novo status" }), status]),
       elemento("label", { class: "flow-campo", for: "lote-responsavel" }, [elemento("span", { text: "Responsável" }), responsavel]),
-      elemento("button", { class: "secondary-button compact", type: "button", text: "Aplicar aos selecionados", onclick: aplicar }),
+      botao,
+      elemento("button", {
+        class: "text-button", type: "button", text: "Limpar seleção",
+        onclick: () => { estado.selecionadas = new Set(); desenharTabela(); },
+      }),
+      andamento,
     ]);
+  }
+
+  /**
+   * A ficha abre por cima do painel. Fechá-la precisa devolver o foco ao
+   * protocolo que a abriu — sem isso, quem usa teclado volta ao topo da página e
+   * perde o lugar na lista — e a página de trás não pode rolar junto.
+   */
+  let focoAntesDaFicha = null;
+
+  function abrirGaveta() {
+    const gaveta = document.getElementById("painel-drawer");
+    if (!gaveta) return;
+    if (!gaveta.classList.contains("aberto")) focoAntesDaFicha = document.activeElement;
+    gaveta.classList.add("aberto");
+    document.body.classList.add("p1-modal-open");
+    const painel = gaveta.querySelector(".flow-drawer-painel");
+    if (painel) painel.focus();
+  }
+
+  function fecharGaveta() {
+    const gaveta = document.getElementById("painel-drawer");
+    if (!gaveta || !gaveta.classList.contains("aberto")) return;
+    gaveta.classList.remove("aberto");
+    document.body.classList.remove("p1-modal-open");
+    estado.aberta = null;
+    if (focoAntesDaFicha && focoAntesDaFicha.isConnected && typeof focoAntesDaFicha.focus === "function") {
+      focoAntesDaFicha.focus();
+    }
+    focoAntesDaFicha = null;
   }
 
   function montarDrawer() {
     const gaveta = elemento("div", { class: "flow-drawer", id: "painel-drawer" }, [
-      elemento("div", { class: "flow-drawer-painel", role: "dialog", "aria-modal": "true", "aria-label": "Ficha da solicitação" }, [
+      elemento("div", {
+        class: "flow-drawer-painel", role: "dialog", "aria-modal": "true",
+        "aria-label": "Ficha da solicitação", tabindex: "-1",
+      }, [
         elemento("div", { class: "flow-drawer-head" }, [
           elemento("div", { style: "flex:1;min-width:0" }, [
             elemento("h2", { id: "painel-drawer-titulo", text: "—" }),
             elemento("p", { id: "painel-drawer-sub", text: "" }),
           ]),
-          elemento("button", {
-            class: "text-button", type: "button", text: "Fechar",
-            onclick: () => gaveta.classList.remove("aberto"),
-          }),
+          elemento("button", { class: "text-button", type: "button", text: "Fechar", onclick: fecharGaveta }),
         ]),
         elemento("div", { class: "flow-drawer-corpo", id: "painel-drawer-corpo" }),
       ]),
     ]);
     gaveta.addEventListener("click", (evento) => {
-      if (evento.target === gaveta) gaveta.classList.remove("aberto");
+      if (evento.target === gaveta) fecharGaveta();
     });
     document.addEventListener("keydown", (evento) => {
-      if (evento.key === "Escape") gaveta.classList.remove("aberto");
+      if (evento.key === "Escape") fecharGaveta();
     });
     return gaveta;
   }
@@ -1366,13 +1491,33 @@
   }
 
   const ABAS = [
-    { chave: "solicitacoes", rotulo: "Solicitações" },
-    { chave: "lds", rotulo: "Base de LDs", admin: true },
-    { chave: "normas", rotulo: "Normas e códigos", admin: true },
-    { chave: "tipos", rotulo: "Tipos de solicitação", admin: true },
-    { chave: "usuarios", rotulo: "Usuários", admin: true },
-    { chave: "acesso", rotulo: "Acesso", admin: true },
+    { chave: "solicitacoes", rotulo: "Solicitações", titulo: "Solicitações" },
+    { chave: "lds", rotulo: "Base de LDs", titulo: "Base de LDs", admin: true },
+    { chave: "normas", rotulo: "Normas e códigos", titulo: "Normas e códigos", admin: true },
+    { chave: "tipos", rotulo: "Tipos de solicitação", titulo: "Tipos de solicitação", admin: true },
+    { chave: "usuarios", rotulo: "Usuários", titulo: "Usuários", admin: true },
+    { chave: "acesso", rotulo: "Acesso", titulo: "Quem pode entrar", admin: true },
   ];
+
+  /** A aba visível vira parte do endereço: atualizar a página, voltar pelo
+   *  navegador ou mandar o link a um colega passam a cair no mesmo lugar. */
+  function abaDaUrl() {
+    const pedida = texto(new URLSearchParams(root.location.search).get("aba"));
+    const conhecida = ABAS.find((aba) => aba.chave === pedida);
+    if (!conhecida) return "solicitacoes";
+    if (conhecida.admin && !Api.auth.ehAdmin()) return "solicitacoes";
+    return conhecida.chave;
+  }
+
+  function guardarAbaNaUrl(substituir = false) {
+    const parametros = new URLSearchParams(root.location.search);
+    if (estado.aba === "solicitacoes") parametros.delete("aba");
+    else parametros.set("aba", estado.aba);
+    const busca = parametros.toString();
+    const destino = root.location.pathname + (busca ? `?${busca}` : "");
+    if (substituir) root.history.replaceState({ aba: estado.aba }, "", destino);
+    else root.history.pushState({ aba: estado.aba }, "", destino);
+  }
 
   function renderAba() {
     const conteudo = document.getElementById("painel-conteudo");
@@ -1380,6 +1525,11 @@
     document.querySelectorAll("[data-aba]").forEach((botao) => {
       botao.setAttribute("aria-selected", botao.dataset.aba === estado.aba ? "true" : "false");
     });
+    // O título da página é a única referência de "onde estou" quando a lista
+    // rola e as abas saem da vista.
+    const titulo = document.getElementById("painel-titulo");
+    const aba = ABAS.find((item) => item.chave === estado.aba);
+    if (titulo && aba) titulo.textContent = aba.titulo;
 
     pararAtualizacaoArmazenamento();
     if (estado.aba === "solicitacoes") {
@@ -1426,7 +1576,12 @@
         class: "flow-aba", type: "button", role: "tab", "data-aba": aba.chave,
         "aria-selected": aba.chave === estado.aba ? "true" : "false",
         text: aba.rotulo,
-        onclick: () => { estado.aba = aba.chave; renderAba(); },
+        onclick: () => {
+          if (estado.aba === aba.chave) return;
+          estado.aba = aba.chave;
+          guardarAbaNaUrl();
+          renderAba();
+        },
       }))
     );
 
@@ -1434,7 +1589,7 @@
       Ui.montarTopo({ ativo: "painel", subtitulo: "Painel operacional" }),
       elemento("main", { class: "flow-main largo" }, [
         elemento("div", { class: "flow-page-head" }, [
-          elemento("h1", { text: "Solicitações" }),
+          elemento("h1", { id: "painel-titulo", text: "Solicitações" }),
           montarCentralNotificacoes(),
         ]),
         abas,
@@ -1444,7 +1599,9 @@
       Ui.montarRodape()
     );
     renderAba();
-    carregarSolicitacoes();
+    // Abrir direto em outra aba não deve custar uma consulta de solicitações
+    // que ninguém vai ver.
+    if (estado.aba === "solicitacoes") carregarSolicitacoes();
   }
 
   (async function iniciar() {
@@ -1453,7 +1610,16 @@
     const { data } = await Api.tipos.listar({ incluirInativos: true });
     estado.tipos = data || [];
     estado.tiposPorCodigo = new Map(estado.tipos.map((tipo) => [tipo.code, tipo]));
+    estado.aba = abaDaUrl();
     montarPagina();
+    guardarAbaNaUrl(true);
+    root.addEventListener("popstate", () => {
+      const alvo = abaDaUrl();
+      if (alvo === estado.aba) return;
+      estado.aba = alvo;
+      renderAba();
+      if (estado.aba === "solicitacoes") carregarSolicitacoes();
+    });
     const pararNotificacoes = Api.notificacoes.assinar((notificacao) => {
       avisar(texto(notificacao.title) || "Nova solicitação recebida.", "ok");
       if (!estado.notificacoes.some((item) => item.id === notificacao.id)) {

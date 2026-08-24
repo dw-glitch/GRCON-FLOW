@@ -41,12 +41,21 @@
     return "";
   }
 
-  function cartaoSolicitacao(solicitacao) {
+  /**
+   * Cartão de uma solicitação própria. O protocolo é um botão: antes, ver o
+   * detalhe de um pedido da própria lista exigia copiá-lo à mão para o campo de
+   * busca logo acima — a informação estava na tela e mesmo assim dava trabalho.
+   */
+  function cartaoSolicitacao(solicitacao, aoAbrir) {
     const fechada = ["concluido", "cancelado"].includes(solicitacao.status);
+    const abrir = () => aoAbrir(solicitacao.protocol);
     return elemento("article", { class: "flow-card" }, [
       elemento("div", { style: "display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:flex-start" }, [
         elemento("div", {}, [
-          elemento("div", { class: "protocolo", style: "font-family:var(--font-mono);color:var(--brand-800);font-weight:700", text: solicitacao.protocol }),
+          elemento("button", {
+            class: "flow-protocolo-link", type: "button", text: solicitacao.protocol,
+            "aria-label": `Ver o andamento de ${solicitacao.protocol}`, onclick: abrir,
+          }),
           elemento("strong", { style: "display:block;margin-top:.15rem", text: solicitacao.type_label }),
           solicitacao.summary ? elemento("span", { style: "font-size:.84rem;color:var(--text-3)", text: solicitacao.summary }) : null,
         ]),
@@ -68,6 +77,9 @@
           elemento("dt", { text: "Resposta" }),
           elemento("dd", { style: "white-space:pre-wrap", text: solicitacao.answer }),
         ]) : null,
+      ]),
+      elemento("div", { class: "flow-acoes", style: "margin-top:.9rem" }, [
+        elemento("button", { class: "secondary-button compact", type: "button", text: "Ver detalhes", onclick: abrir }),
       ]),
     ]);
   }
@@ -150,6 +162,14 @@
 
     const minhas = elemento("div", { id: "acomp-minhas" });
 
+    // Abrir um pedido da lista preenche a busca e rola até o resultado: a tela
+    // continua sendo uma só, e fica claro de onde veio o que apareceu.
+    const abrirProtocolo = (protocolo) => {
+      entrada.value = protocolo;
+      consultarProtocolo(protocolo, resultado);
+      resultado.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+
     app.replaceChildren(
       root.FlowUi.montarTopo({ ativo: "acompanhar", subtitulo: "Acompanhamento" }),
       elemento("main", { class: "flow-main estreito" }, [
@@ -176,7 +196,11 @@
         "Quando registrar, ela aparece aqui com o protocolo e o andamento.");
       return;
     }
-    minhas.replaceChildren(...data.map(cartaoSolicitacao));
+    minhas.replaceChildren(
+      elemento("p", { class: "flow-lista-resumo", text:
+        `${data.length} solicitação(ões)${data.length >= 50 ? " · mostrando as 50 mais recentes" : ""}.` }),
+      ...data.map((solicitacao) => cartaoSolicitacao(solicitacao, abrirProtocolo))
+    );
   }
 
   (async function iniciar() {
