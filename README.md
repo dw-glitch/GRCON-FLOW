@@ -113,6 +113,11 @@ Tab e, quando não há nada a digitar, começa com o cursor em "Cancelar".
 | `POSSIVEIS_CORRESPONDENCIAS` | Candidatos encontrados pelo título. |
 | `TRIAGEM_NAO_APLICAVEL` | O tipo não depende de consulta documental. |
 
+Quando a LD afirma que o documento está alocado mas não informa o código da
+GRDT, a tela diz **"alocada, código não informado na LD"** — nem inventa um
+código, nem afirma que não há alocação. As três respostas possíveis da LD
+(código, alocação sem código, sem alocação) são ditas como três, não como duas.
+
 Na **Postagem no SIGEM**, o solicitante não precisa conhecer as etapas internas.
 Ele informa um ou vários títulos e, quando souber, os códigos. O painel decide a
 próxima ação de cada item: identificar código, incluir na LD, alocar ou postar.

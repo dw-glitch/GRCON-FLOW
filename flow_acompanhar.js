@@ -25,16 +25,19 @@
   function situacaoLd(item) {
     const status = texto(item.ld_presence_status);
     if (status === "NOVO") return "NOVO · não consta nas LDs vigentes";
+    const alocacao = root.FlowUi.situacaoAlocacao(item);
     if (status === "JA_EXISTE") {
       const base = `JÁ EXISTE${texto(item.ld_name) ? ` · ${texto(item.ld_name)}` : ""}`;
-      return texto(item.allocation)
-        ? `${base} · alocação ${texto(item.allocation)}`
-        : `${base} · sem alocação identificada`;
+      if (alocacao.estado === "identificada") return `${base} · alocação ${alocacao.codigo}`;
+      // Dizer "sem alocação identificada" quando a LD afirma ALOCADO é contar
+      // ao solicitante o oposto do que a base diz.
+      if (alocacao.estado === "confirmada") return `${base} · alocada, código não informado na LD`;
+      return `${base} · sem alocação identificada`;
     }
     if (status === "JA_EXISTE_DIVERGENTE") {
-      return texto(item.allocation)
-        ? `JÁ EXISTE · validar divergência · alocação ${texto(item.allocation)}`
-        : "JÁ EXISTE · validar informações nas LDs";
+      if (alocacao.estado === "identificada") return `JÁ EXISTE · validar divergência · alocação ${alocacao.codigo}`;
+      if (alocacao.estado === "confirmada") return "JÁ EXISTE · validar divergência · alocada, código não informado na LD";
+      return "JÁ EXISTE · validar informações nas LDs";
     }
     if (status === "POSSIVEL_EXISTENTE") return "POSSÍVEL EXISTENTE · código em validação";
     if (status === "PENDENTE_IDENTIFICACAO") return "IDENTIFICAÇÃO PENDENTE · código ainda não confirmado";

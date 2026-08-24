@@ -115,6 +115,34 @@
     return elemento("span", { class: `flow-selo ${classe}`, text: rotuloStatus(valor) });
   }
 
+  /**
+   * O que a LD diz sobre a alocação deste item — e são três respostas, não duas.
+   *
+   * A LD pode trazer o código da alocação; pode afirmar que o documento está
+   * alocado sem informar o código (379 linhas das LDs vigentes estão assim); ou
+   * pode não alocar. A triagem já distingue os três casos — por isso o resumo
+   * dela diz "com alocação (confirmada)" quando o código falta. Eram as telas
+   * que colapsavam os dois últimos num "sem alocação identificada" que
+   * contradiz a própria LD, ou num "—" que joga a informação fora.
+   *
+   * A comparação é exata de propósito: "NÃO ALOCADO" contém "ALOCADO", e um
+   * teste por substring inverteria justamente o caso que importa.
+   */
+  function situacaoAlocacao(item) {
+    const codigo = texto(item && item.allocation);
+    if (codigo) return { estado: "identificada", codigo, rotulo: codigo };
+    // Tipo que não consulta LD não tem alocação para ter ou deixar de ter.
+    // Dizer "sem alocação identificada" aqui afirmaria que procuramos.
+    if (texto(item && item.classification) === "TRIAGEM_NAO_APLICAVEL") {
+      return { estado: "nao-aplicavel", codigo: "", rotulo: "—" };
+    }
+    const status = texto(item && item.allocation_status).toUpperCase().replace(/\s+/g, " ");
+    if (status === "ALOCADO" || status === "ALLOCATED") {
+      return { estado: "confirmada", codigo: "", rotulo: "Alocada · código não informado na LD" };
+    }
+    return { estado: "ausente", codigo: "", rotulo: "Sem alocação identificada" };
+  }
+
   /** Situação do prazo, dita como a operação fala: no prazo, vence hoje, atrasado. */
   function situacaoPrazo(dataLimite, fechado) {
     if (fechado || !dataLimite) return null;
@@ -541,6 +569,7 @@
     $, $$, elemento, esc, texto,
     CLASSIFICACOES, STATUS, PAPEIS,
     rotuloStatus, rotuloPapel, seloClassificacao, seloStatus, seloPrazo, situacaoPrazo,
+    situacaoAlocacao,
     data, dataHora, iniciais,
     avisar, carregando, vazio, confirmar, avisoDaUrl, abrirModal, abrirPerfil,
     montarTopo, montarRodape, exigirSessao,

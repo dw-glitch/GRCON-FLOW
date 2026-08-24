@@ -123,11 +123,18 @@
     allocation: {
       rotulo: "Alocação",
       celula: (item) => {
-        if (texto(item.allocation)) return elemento("code", { text: item.allocation });
-        if (item.classification === "ACAO_NECESSARIA") {
-          return elemento("span", { class: "flow-selo acao", text: "Sem alocação identificada" });
+        const situacao = Ui.situacaoAlocacao(item);
+        if (situacao.estado === "identificada") return elemento("code", { text: situacao.codigo });
+        // A LD afirma que está alocado e não diz em qual GRDT. Mostrar "—" aqui
+        // fazia a linha parecer não apurada, quando na verdade a informação
+        // apurada é justamente essa: falta o código na LD de origem.
+        if (situacao.estado === "confirmada") {
+          return elemento("span", { class: "flow-selo validar", text: situacao.rotulo });
         }
-        return elemento("span", { style: "color:var(--text-3)", text: "—" });
+        if (situacao.estado === "nao-aplicavel") {
+          return elemento("span", { style: "color:var(--text-3)", text: situacao.rotulo });
+        }
+        return elemento("span", { class: "flow-selo acao", text: situacao.rotulo });
       },
     },
     allocation_status: { rotulo: "Situação da alocação", celula: (item) => elemento("span", { text: texto(item.allocation_status) || "—" }) },
