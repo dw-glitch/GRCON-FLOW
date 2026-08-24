@@ -73,6 +73,8 @@
     if (/Email not confirmed/i.test(bruto)) return "Confirme seu e-mail antes de entrar.";
     if (/User already registered/i.test(bruto)) return "Este e-mail já tem cadastro. Faça login.";
     if (/Password should be at least/i.test(bruto)) return "A senha precisa ter pelo menos 6 caracteres.";
+    if (/LI\/MC.*N-1710|PDF e o Excel|PDF \+ Excel|PDF obrigatório|Excel obrigatório/i.test(bruto)) return bruto;
+    if (/Limite de 5 anexos complementares/i.test(bruto)) return "Esta solicitação já tem o limite de 5 anexos complementares.";
     if (/Limite de 5 anexos/i.test(bruto)) return "Esta solicitação já tem o limite de 5 anexos.";
     if (/flow_attachments_(extension|mime)_valid|mime type|formato de anexo/i.test(bruto)) {
       return "Envie somente arquivos PDF, Word ou Excel.";

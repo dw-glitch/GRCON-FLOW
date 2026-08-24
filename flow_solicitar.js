@@ -29,6 +29,7 @@
     etapa: 1,
     documentos: [],
     anexos: [],
+    paresN1710: {},
     formulario: {},
     enviando: false,
   };
@@ -87,6 +88,7 @@
           estado.formulario = {};
           estado.documentos = [];
           estado.anexos = [];
+          estado.paresN1710 = {};
           estado.etapa = 2;
           render();
         },
@@ -147,6 +149,101 @@
     const entrada = node.querySelector("input, select, textarea");
     if (!entrada) return "";
     return entrada.type === "checkbox" ? entrada.checked : entrada.value;
+  }
+
+  // LI e MC são documentos N-1710 que sempre chegam em duas representações
+  // do mesmo item: PDF + Excel. O par fica fora do objeto que vai ao banco até
+  // a solicitação nascer, porque o item_id só existe depois do protocolo.
+  function codigoLiMcN1710(item) {
+    const codigo = texto(item && item.document).toUpperCase();
+    return /^(LI|MC)-/.test(codigo) ? codigo : "";
+  }
+
+  function extensaoArquivo(arquivo) {
+    return texto(arquivo && arquivo.name).toLowerCase().split(".").pop();
+  }
+
+  function parN1710(item, criar = true) {
+    const chave = codigoLiMcN1710(item);
+    if (!chave) return null;
+    if (!estado.paresN1710[chave] && criar) estado.paresN1710[chave] = { pdf: null, excel: null };
+    return estado.paresN1710[chave] || null;
+  }
+
+  function moverParN1710(chaveAnterior, itemNovo) {
+    const chaveNova = codigoLiMcN1710(itemNovo);
+    if (!chaveAnterior || chaveAnterior === chaveNova) return;
+    const existente = estado.paresN1710[chaveAnterior];
+    delete estado.paresN1710[chaveAnterior];
+    if (existente && chaveNova) estado.paresN1710[chaveNova] = existente;
+  }
+
+  function receberArquivoN1710(item, formato, arquivo) {
+    if (!arquivo) return;
+    const erro = Api.anexos.validar(arquivo);
+    if (erro) { avisar(erro, "erro"); return; }
+    const extensao = extensaoArquivo(arquivo);
+    const compativel = formato === "pdf"
+      ? extensao === "pdf"
+      : ["xls", "xlsx", "xlsm"].includes(extensao);
+    if (!compativel) {
+      avisar(formato === "pdf"
+        ? "Selecione o arquivo PDF deste LI/MC."
+        : "Selecione a planilha Excel (.xls, .xlsx ou .xlsm) deste LI/MC.", "erro");
+      return;
+    }
+    const par = parN1710(item);
+    if (!par) return;
+    par[formato] = arquivo;
+    render();
+  }
+
+  function montarParN1710(item) {
+    const codigo = codigoLiMcN1710(item);
+    if (!codigo) return null;
+    const par = parN1710(item);
+    const slot = (formato, rotulo, accept) => {
+      const arquivo = par[formato];
+      const input = elemento("input", { type: "file", accept, hidden: true });
+      input.addEventListener("change", () => {
+        receberArquivoN1710(item, formato, input.files && input.files[0]);
+        input.value = "";
+      });
+      return elemento("div", {
+        style: "display:flex;gap:.55rem;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:.55rem .65rem;border:1px solid var(--line);border-radius:.55rem;background:var(--surface);",
+      }, [
+        elemento("div", { style: "min-width:12rem;flex:1" }, [
+          elemento("strong", { style: "display:block;font-size:.82rem", text: rotulo }),
+          elemento("small", { text: arquivo ? `${arquivo.name} · ${tamanhoArquivo(arquivo.size)}` : "Obrigatório para GRDT/postagem" }),
+        ]),
+        elemento("div", { class: "flow-acoes", style: "margin:0;gap:.35rem" }, [
+          elemento("button", {
+            class: arquivo ? "secondary-button compact" : "primary-button compact",
+            type: "button", text: arquivo ? "Trocar" : "Selecionar", onclick: () => input.click(),
+          }),
+          arquivo ? elemento("button", {
+            class: "text-button danger", type: "button", text: "Remover",
+            onclick: () => { par[formato] = null; render(); },
+          }) : null,
+          input,
+        ]),
+      ]);
+    };
+
+    const completo = Boolean(par.pdf && par.excel);
+    return elemento("div", {
+      class: `flow-aviso ${completo ? "ok" : "atencao"}`,
+      style: "margin:.55rem 0 .2rem 2.6rem;display:grid;gap:.5rem",
+    }, [
+      elemento("div", {}, [
+        elemento("strong", { text: `${codigo} · conjunto N-1710` }),
+        elemento("p", { style: "margin:.15rem 0 0", text: completo
+          ? "PDF e Excel selecionados. Os dois serão vinculados a este documento."
+          : "Para LI ou MC, envie o PDF e o Excel do mesmo documento. Os dois são obrigatórios antes da GRDT/postagem." }),
+      ]),
+      slot("pdf", "Arquivo PDF", ".pdf"),
+      slot("excel", "Arquivo Excel", ".xls,.xlsx,.xlsm"),
+    ]);
   }
 
   /** Entrada documental. Para Postagem no SIGEM, título é suficiente e código é opcional. */
@@ -297,10 +394,13 @@
       ]));
     });
 
+    const temParN1710 = estado.documentos.some((item) => Boolean(codigoLiMcN1710(item)));
     return elemento("section", { class: "flow-card" }, [
       elemento("div", { class: "flow-card-head" }, [
-        elemento("h3", { text: "Anexos" }),
-        elemento("p", { text: `${estado.anexos.length} de ${maximo} arquivos selecionados.` }),
+        elemento("h3", { text: temParN1710 ? "Anexos complementares" : "Anexos" }),
+        elemento("p", { text: temParN1710
+          ? `${estado.anexos.length} de ${maximo} complementares selecionados. O PDF + Excel de LI/MC é enviado no próprio item acima.`
+          : `${estado.anexos.length} de ${maximo} arquivos selecionados.` }),
       ]),
       area,
       estado.anexos.length ? lista : null,
@@ -363,10 +463,14 @@
         titulo.addEventListener("input", () => { estado.documentos[indice].requested_title = titulo.value; });
         codigo.addEventListener("change", () => {
           const atual = estado.documentos[indice];
+          const chaveAnterior = codigoLiMcN1710(atual);
           const valor = texto(codigo.value);
-          estado.documentos[indice] = valor
+          const itemNovo = valor
             ? Docs.itemDeCodigo(valor, { titulo: titulo.value, referencia: atual.reference, arquivo: atual.file_name })
             : { ...Docs.itemDeTitulo(titulo.value, atual.reference), file_name: atual.file_name || "" };
+          moverParN1710(chaveAnterior, itemNovo);
+          estado.documentos[indice] = itemNovo;
+          render();
         });
         corpo = elemento("span", { class: "flow-item-corpo flow-item-edicao" }, [titulo, codigo]);
       } else {
@@ -381,9 +485,15 @@
         elemento("button", {
           class: "text-button danger", type: "button", text: "Remover",
           "aria-label": `Remover item ${indice + 1}`,
-          onclick: () => { estado.documentos.splice(indice, 1); render(); },
+          onclick: () => {
+            const chave = codigoLiMcN1710(estado.documentos[indice]);
+            if (chave) delete estado.paresN1710[chave];
+            estado.documentos.splice(indice, 1);
+            render();
+          },
         }),
       ]));
+      if (editavel && codigoLiMcN1710(item)) destino.append(montarParN1710(item));
     });
   }
 
@@ -492,6 +602,15 @@
       if (!estado.documentos.length) return "Adicione pelo menos um documento para postagem. O código pode ficar em branco.";
       const vazio = estado.documentos.find((item) => !texto(item.document) && !texto(item.requested_title));
       if (vazio) return "Todo item precisa ter pelo menos um título/descrição ou um código.";
+      for (const item of estado.documentos) {
+        const codigo = codigoLiMcN1710(item);
+        if (!codigo) continue;
+        const par = parN1710(item, false);
+        if (!par || !par.pdf || !par.excel) {
+          const faltam = [!par || !par.pdf ? "PDF" : "", !par || !par.excel ? "Excel" : ""].filter(Boolean).join(" e ");
+          return `${codigo} é LI/MC da N-1710. Anexe o ${faltam} obrigatório(s) antes de continuar.`;
+        }
+      }
     } else if (tipo.requires_document && !estado.documentos.length) {
       return "Informe pelo menos um documento para este tipo de solicitação.";
     }
@@ -527,8 +646,13 @@
       itens.append(elemento("p", { class: "flow-aviso", text: "Nenhum documento informado. Tudo bem — vamos identificar a partir do que você descreveu." }));
     }
 
+    const paresObrigatorios = estado.documentos.filter((item) => Boolean(codigoLiMcN1710(item)));
+    const totalArquivosObrigatorios = paresObrigatorios.length * 2;
     const anexosResumo = estado.anexos.length
-      ? elemento("p", { class: "flow-aviso", text: `${estado.anexos.length} arquivo(s) serão anexados à solicitação.` })
+      ? elemento("p", { class: "flow-aviso", text: `${estado.anexos.length} arquivo(s) complementar(es) serão anexados à solicitação.` })
+      : null;
+    const paresResumo = totalArquivosObrigatorios
+      ? elemento("p", { class: "flow-aviso ok", text: `${paresObrigatorios.length} item(ns) LI/MC da N-1710 · ${totalArquivosObrigatorios} arquivos obrigatórios (PDF + Excel) serão enviados e vinculados aos documentos corretos.` })
       : null;
 
     return elemento("div", {}, [
@@ -539,6 +663,7 @@
         dados,
         estado.documentos.length ? elemento("h4", { style: "margin:1.2rem 0 .4rem;font-size:.9rem", text: `Itens (${estado.documentos.length})` }) : null,
         itens,
+        paresResumo,
         anexosResumo,
       ]),
       elemento("div", { class: "flow-acoes", style: "margin-top:1.2rem" }, [
@@ -597,19 +722,49 @@
     return partes.join("\n");
   }
 
-  async function enviarAnexos(requestId, arquivos) {
+  function prepararAnexosParaEnvio(resultadoCriacao) {
+    const entradas = estado.anexos.map((arquivo) => ({
+      arquivo, itemId: null, rotulo: `Anexo complementar · ${arquivo.name}`,
+    }));
+    const itensCriados = Array.isArray(resultadoCriacao && resultadoCriacao.request_items)
+      ? resultadoCriacao.request_items : [];
+
+    estado.documentos.forEach((item, indice) => {
+      const codigo = codigoLiMcN1710(item);
+      if (!codigo) return;
+      const par = parN1710(item, false);
+      const criado = itensCriados.find((registro) => Number(registro.item_number) === indice + 1);
+      if (!criado || !criado.id) {
+        entradas.push({ arquivo: par && par.pdf, itemId: null, rotulo: `${codigo} · PDF`, erroPreparacao: "Não foi possível vincular o PDF ao item criado." });
+        entradas.push({ arquivo: par && par.excel, itemId: null, rotulo: `${codigo} · Excel`, erroPreparacao: "Não foi possível vincular o Excel ao item criado." });
+        return;
+      }
+      entradas.push({ arquivo: par.pdf, itemId: criado.id, rotulo: `${codigo} · PDF` });
+      entradas.push({ arquivo: par.excel, itemId: criado.id, rotulo: `${codigo} · Excel` });
+    });
+    return entradas.filter((entrada) => entrada.arquivo || entrada.erroPreparacao);
+  }
+
+  async function enviarAnexos(requestId, entradas) {
     const resultado = { enviados: [], falhas: [] };
-    for (let indice = 0; indice < arquivos.length; indice += 1) {
-      const arquivo = arquivos[indice];
+    for (let indice = 0; indice < entradas.length; indice += 1) {
+      const entrada = entradas[indice] && entradas[indice].arquivo
+        ? entradas[indice]
+        : { arquivo: entradas[indice], itemId: null, rotulo: texto(entradas[indice] && entradas[indice].name) };
+      const arquivo = entrada.arquivo;
+      if (entrada.erroPreparacao || !arquivo) {
+        resultado.falhas.push({ ...entrada, erro: entrada.erroPreparacao || "Arquivo obrigatório ausente." });
+        continue;
+      }
       const andamento = document.getElementById("sol-anexos-envio");
       if (andamento) {
         andamento.className = "flow-carregando";
         andamento.replaceChildren();
-        andamento.textContent = `Enviando anexo ${indice + 1} de ${arquivos.length}: ${arquivo.name}`;
+        andamento.textContent = `Enviando ${indice + 1} de ${entradas.length}: ${entrada.rotulo || arquivo.name}`;
       }
-      const retorno = await Api.anexos.enviar(requestId, arquivo);
-      if (retorno.error) resultado.falhas.push({ arquivo, erro: retorno.error });
-      else resultado.enviados.push({ arquivo });
+      const retorno = await Api.anexos.enviar(requestId, arquivo, entrada.itemId || null);
+      if (retorno.error) resultado.falhas.push({ ...entrada, erro: retorno.error });
+      else resultado.enviados.push(entrada);
     }
     return resultado;
   }
@@ -621,22 +776,23 @@
 
     if (!resultado.falhas.length) {
       destino.className = "flow-aviso ok";
-      destino.textContent = `${resultado.enviados.length} anexo(s) enviado(s) com sucesso.`;
+      destino.textContent = `${resultado.enviados.length} arquivo(s) enviado(s) com sucesso.`;
       return;
     }
 
     destino.className = "flow-aviso atencao";
     destino.append(
-      elemento("strong", { text: `${resultado.enviados.length} anexo(s) enviado(s); ${resultado.falhas.length} falharam.` }),
-      elemento("p", { text: "A solicitação foi registrada normalmente. Tente novamente somente os arquivos abaixo:" }),
-      elemento("ul", {}, resultado.falhas.map(({ arquivo, erro }) =>
-        elemento("li", { text: `${arquivo.name}: ${erro}` })))
+      elemento("strong", { text: `${resultado.enviados.length} arquivo(s) enviado(s); ${resultado.falhas.length} falharam.` }),
+      elemento("p", { text: "A solicitação foi registrada. Os itens LI/MC que ainda não tiverem PDF + Excel ficam bloqueados antes da GRDT/postagem até o reenvio dar certo." }),
+      elemento("ul", {}, resultado.falhas.map(({ arquivo, rotulo, erro }) =>
+        elemento("li", { text: `${rotulo || (arquivo && arquivo.name) || "Arquivo"}: ${erro}` })))
     );
     destino.append(elemento("button", {
       class: "secondary-button compact", type: "button", text: "Tentar anexos novamente",
       onclick: async (evento) => {
         evento.currentTarget.disabled = true;
-        const novaTentativa = await enviarAnexos(requestId, resultado.falhas.map(({ arquivo }) => arquivo));
+        const pendentes = resultado.falhas.map(({ erro, ...entrada }) => entrada);
+        const novaTentativa = await enviarAnexos(requestId, pendentes);
         resultado.enviados.push(...novaTentativa.enviados);
         resultado.falhas = novaTentativa.falhas;
         mostrarResultadoAnexos(requestId, resultado);
@@ -675,18 +831,17 @@
       return;
     }
 
-    // O protocolo aparece imediatamente. Os anexos e a triagem continuam com
-    // resultado visível, sem transformar uma falha de arquivo em perda do pedido.
-    const arquivos = [...estado.anexos];
+    // Primeiro sobe os arquivos. Para LI/MC, o PDF e o Excel são vinculados ao
+    // item correto e só então a triagem define a próxima ação da equipe.
+    const arquivos = prepararAnexosParaEnvio(data);
     mostrarRecibo(data, arquivos.length);
-    const triagemPendente = data.uses_ld
-      ? Api.triagem.solicitacao(data.id)
-      : Promise.resolve({ data: null, error: null });
     const resultadoAnexos = arquivos.length
       ? await enviarAnexos(data.id, arquivos)
       : { enviados: [], falhas: [] };
     if (arquivos.length) mostrarResultadoAnexos(data.id, resultadoAnexos);
-    const triagem = await triagemPendente;
+    const triagem = data.uses_ld
+      ? await Api.triagem.solicitacao(data.id)
+      : { data: null, error: null };
 
     const aviso = document.getElementById("sol-pos-envio");
     if (aviso) {
@@ -723,7 +878,7 @@
             class: "secondary-button", type: "button", text: "Fazer outra solicitação",
             onclick: () => {
               estado.tipo = null; estado.etapa = 1;
-              estado.documentos = []; estado.anexos = []; estado.formulario = {};
+              estado.documentos = []; estado.anexos = []; estado.paresN1710 = {}; estado.formulario = {};
               render();
             },
           }),

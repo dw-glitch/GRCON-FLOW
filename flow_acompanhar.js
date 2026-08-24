@@ -72,6 +72,11 @@
         elemento("span", { class: "flow-item-corpo" }, [
           elemento("code", { text: item.document || "Código ainda não informado" }),
           item.requested_title ? elemento("strong", { text: item.requested_title }) : null,
+          item.requires_pdf_excel_pair ? elemento("em", { text:
+            item.pdf_attachment_ready && item.excel_attachment_ready
+              ? "N-1710 · PDF + Excel recebidos"
+              : `N-1710 · aguardando ${[!item.pdf_attachment_ready ? "PDF" : "", !item.excel_attachment_ready ? "Excel" : ""].filter(Boolean).join(" + ")}`
+          }) : null,
           item.answer ? elemento("em", { text: item.answer }) : null,
         ]),
         seloStatus(item.status),

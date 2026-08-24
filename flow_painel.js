@@ -73,7 +73,8 @@
     pendente: "Pendente", em_andamento: "Em andamento", concluido: "Concluído", nao_aplicavel: "Não aplicável",
   });
   const PROXIMAS_ACOES = Object.freeze({
-    IDENTIFICAR_CODIGO: "Identificar código", INCLUIR_LD: "Incluir na LD", ALOCAR: "Fazer alocação",
+    IDENTIFICAR_CODIGO: "Identificar código", INCLUIR_LD: "Incluir na LD",
+    ANEXAR_PDF_EXCEL: "Receber PDF + Excel (N-1710)", ALOCAR: "Fazer GRDT / alocação",
     POSTAR_SIGEM: "Postar no SIGEM", CONCLUIDO: "Concluído",
   });
   const etapaInterna = (valor) => elemento("span", { class: `flow-selo ${valor === "concluido" ? "ok" : valor === "em_andamento" ? "validar" : "acao"}`, text: ETAPAS_INTERNAS[valor] || texto(valor) || "—" });
@@ -110,6 +111,17 @@
     ld_stage: { rotulo: "LD", celula: (item) => etapaInterna(item.ld_stage) },
     allocation_stage: { rotulo: "Alocação", celula: (item) => etapaInterna(item.allocation_stage) },
     sigem_stage: { rotulo: "Postagem SIGEM", celula: (item) => etapaInterna(item.sigem_stage) },
+    n1710_files: {
+      rotulo: "Arquivos LI/MC",
+      celula: (item) => {
+        if (!item.requires_pdf_excel_pair) return elemento("span", { style: "color:var(--text-3)", text: "—" });
+        const completo = item.pdf_attachment_ready && item.excel_attachment_ready;
+        return elemento("span", { class: `flow-selo ${completo ? "ok" : "acao"}`, text:
+          completo ? "PDF + Excel ✓"
+            : `Falta ${[!item.pdf_attachment_ready ? "PDF" : "", !item.excel_attachment_ready ? "Excel" : ""].filter(Boolean).join(" + ")}`
+        });
+      },
+    },
     classification: { rotulo: "Classificação", celula: (item, tipo) => seloClassificacao(item.classification, tipo && tipo.not_found_is_expected) },
   };
 
@@ -413,11 +425,14 @@
       const lista = elemento("div", { class: "flow-itens" });
       data.anexos.forEach((anexo) => {
         const extensao = texto(anexo.file_name).split(".").pop().toUpperCase();
+        const itemVinculado = anexo.item_id
+          ? (data.itens || []).find((item) => item.id === anexo.item_id)
+          : null;
         lista.append(elemento("div", { class: "flow-item" }, [
           elemento("span", { class: "flow-item-num", text: "📎" }),
           elemento("span", { class: "flow-item-corpo" }, [
             elemento("code", { text: anexo.file_name }),
-            elemento("em", { text: `${extensao} · ${tamanhoArquivo(anexo.size_bytes)}` }),
+            elemento("em", { text: `${extensao} · ${tamanhoArquivo(anexo.size_bytes)}${itemVinculado ? ` · vinculado a ${itemVinculado.document || `item ${itemVinculado.item_number}`}` : ""}` }),
           ]),
           elemento("button", {
             class: "text-button", type: "button", text: "Baixar",
@@ -462,9 +477,15 @@
     const opcoes = [...new Set([...fluxo, "aguardando_info", "pendente", "cancelado"])];
 
     const status = elemento("select", { id: "acao-status" });
+    const parN1710Pendente = (solicitacao.itens || []).some((item) =>
+      item.requires_pdf_excel_pair && !(item.pdf_attachment_ready && item.excel_attachment_ready));
     opcoes.forEach((valor) => {
       const node = elemento("option", { value: valor, text: Ui.rotuloStatus(valor) });
       if (valor === solicitacao.status) node.selected = true;
+      if (valor === "concluido" && parN1710Pendente) {
+        node.disabled = true;
+        node.title = "Há LI/MC da N-1710 sem PDF + Excel.";
+      }
       status.append(node);
     });
 
@@ -605,6 +626,9 @@
       elemento("div", { class: "flow-acoes", style: "margin-top:.8rem" }, [
         elemento("button", {
           class: "secondary-button compact", type: "button", text: "Concluir todos os itens",
+          disabled: itens.some((item) => item.requires_pdf_excel_pair && !(item.pdf_attachment_ready && item.excel_attachment_ready)) || null,
+          title: itens.some((item) => item.requires_pdf_excel_pair && !(item.pdf_attachment_ready && item.excel_attachment_ready))
+            ? "Complete o PDF + Excel dos itens LI/MC antes de concluir." : "",
           onclick: async () => {
             if (!Ui.confirmar("Marcar todos os itens desta solicitação como concluídos?")) return;
             const { error } = await Api.itens.atualizar(itens.map((i) => i.id), "status", "concluido", "Concluído em lote pela ficha");
@@ -652,6 +676,16 @@
         item.triaged_at ? elemento("small", { text: `Triado em ${dataHora(item.triaged_at)}${ultima ? ` · execução ${ultima.run_number}` : ""}` }) : null,
       ]),
     ]));
+
+    if (item.requires_pdf_excel_pair) {
+      const completo = item.pdf_attachment_ready && item.excel_attachment_ready;
+      blocos.push(elemento("div", { class: `flow-aviso ${completo ? "ok" : "atencao"}` }, [
+        elemento("strong", { text: "LI/MC · N-1710 — conjunto obrigatório" }),
+        elemento("p", { text: completo
+          ? "PDF e Excel recebidos. O item está liberado para seguir para GRDT/alocação."
+          : `Aguardando ${[!item.pdf_attachment_ready ? "PDF" : "", !item.excel_attachment_ready ? "Excel" : ""].filter(Boolean).join(" e ")}. A GRDT/postagem não pode ser concluída até receber os dois arquivos.` }),
+      ]));
+    }
 
     // Ocorrências nas LDs
     if (ocorrencias.length) {
@@ -750,6 +784,13 @@
     const ldEtapa = seletorEtapa("item-ld-stage", item.ld_stage || "pendente");
     const alocEtapa = seletorEtapa("item-allocation-stage", item.allocation_stage || "pendente");
     const sigemEtapa = seletorEtapa("item-sigem-stage", item.sigem_stage || "pendente");
+    const parN1710Completo = !item.requires_pdf_excel_pair || (item.pdf_attachment_ready && item.excel_attachment_ready);
+    if (!parN1710Completo) {
+      const concluirStatus = status.querySelector('option[value="concluido"]');
+      const concluirSigem = sigemEtapa.querySelector('option[value="concluido"]');
+      if (concluirStatus) concluirStatus.disabled = true;
+      if (concluirSigem) concluirSigem.disabled = true;
+    }
 
     blocos.push(elemento("section", { class: "flow-card" }, [
       elemento("div", { class: "flow-card-head" }, [elemento("h3", { text: "Tratar este item" })]),

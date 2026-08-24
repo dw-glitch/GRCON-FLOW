@@ -52,7 +52,8 @@
 
   const ACAO_LEGIVEL = Object.freeze({
     IDENTIFICAR_CODIGO: "Identificar código", INCLUIR_LD: "Incluir na LD",
-    ALOCAR: "Alocar documento", POSTAR_SIGEM: "Postar no SIGEM", CONCLUIDO: "Concluído",
+    ANEXAR_PDF_EXCEL: "Receber PDF + Excel (N-1710)", ALOCAR: "Fazer GRDT / alocação",
+    POSTAR_SIGEM: "Postar no SIGEM", CONCLUIDO: "Concluído",
   });
 
   // Mesmos oito títulos exibidos na tabela do painel. Esta lista é exportada
@@ -83,7 +84,12 @@
     { header: "ALOCAÇÃO", key: "allocation", width: 25, value: (r) => texto(r.allocation) },
     { header: "SITUAÇÃO DA ALOCAÇÃO", key: "allocation_status", width: 23, value: (r) => texto(r.allocation_status) },
     { header: "STATUS NO SIGEM", key: "sigem_status", width: 21, value: (r) => texto(r.sigem_status) },
-    { header: "PRÓXIMA AÇÃO", key: "internal_next_action", width: 22, value: (r) => ACAO_LEGIVEL[r.internal_next_action] || texto(r.internal_next_action) },
+    { header: "PRÓXIMA AÇÃO", key: "internal_next_action", width: 26, value: (r) => ACAO_LEGIVEL[r.internal_next_action] || texto(r.internal_next_action) },
+    { header: "ARQUIVOS LI/MC N-1710", key: "n1710_files", width: 24, value: (r) => {
+      if (!r.requires_pdf_excel_pair) return "Não aplicável";
+      if (r.pdf_attachment_ready && r.excel_attachment_ready) return "PDF + Excel recebidos";
+      return `Pendente: ${[!r.pdf_attachment_ready ? "PDF" : "", !r.excel_attachment_ready ? "Excel" : ""].filter(Boolean).join(" + ")}`;
+    } },
     { header: "ETAPA · CÓDIGO", key: "code_stage", width: 18, value: (r) => ETAPA_LEGIVEL[r.code_stage] || texto(r.code_stage) },
     { header: "ETAPA · LD", key: "ld_stage", width: 18, value: (r) => ETAPA_LEGIVEL[r.ld_stage] || texto(r.ld_stage) },
     { header: "ETAPA · ALOCAÇÃO", key: "allocation_stage", width: 20, value: (r) => ETAPA_LEGIVEL[r.allocation_stage] || texto(r.allocation_stage) },
@@ -154,6 +160,9 @@
         : "",
       texto(registro.triage_rule),
       texto(registro.internal_next_action) ? `Próxima ação interna: ${ACAO_LEGIVEL[registro.internal_next_action] || texto(registro.internal_next_action)}.` : "",
+      registro.requires_pdf_excel_pair
+        ? `LI/MC N-1710: PDF ${registro.pdf_attachment_ready ? "recebido" : "pendente"}; Excel ${registro.excel_attachment_ready ? "recebido" : "pendente"}.`
+        : "",
       texto(registro.item_answer) ? `Resposta: ${texto(registro.item_answer)}` : "",
     ].filter(Boolean).join(" ");
     const inclusao = registro.ld_stage === "concluido" ? "não"
