@@ -16,10 +16,32 @@
   const { elemento, avisar, texto, seloClassificacao, seloStatus, seloPrazo, data: fmtData, dataHora } = Ui;
   const Api = root.FlowApi;
   const app = document.getElementById("app");
-  const COLUNAS_LISTA = (root.FlowExport && root.FlowExport.COLUNAS_PAINEL
+  const ROTULOS_LISTA = (root.FlowExport && root.FlowExport.COLUNAS_PAINEL
     ? root.FlowExport.COLUNAS_PAINEL.map((coluna) =>
       coluna.header.charAt(0) + coluna.header.slice(1).toLocaleLowerCase("pt-BR"))
     : ["Protocolo", "Tipo", "Solicitante", "Recebida", "Responsável", "Progresso", "Status", "Prazo"]);
+
+  // Cada cabeçalho e a coluna do banco por onde ele ordena, na ordem em que as
+  // células são desenhadas. `null` é coluna que não ordena: progresso é uma
+  // razão entre dois números, e ordenar por `items_done` colocaria 2 de 10 na
+  // frente de 2 de 2 — uma ordem que a coluna não mostra.
+  //
+  // Data e prazo começam pela mais recente/mais próxima; texto começa em A–Z.
+  // É o primeiro clique que a pessoa espera em cada caso.
+  const ORDENS_DA_LISTA = Object.freeze([
+    { coluna: "protocol", ascendentePrimeiro: false },
+    { coluna: "type_label", ascendentePrimeiro: true },
+    { coluna: "requester_name", ascendentePrimeiro: true },
+    { coluna: "created_at", ascendentePrimeiro: false },
+    { coluna: "owner_name", ascendentePrimeiro: true },
+    null,
+    { coluna: "status", ascendentePrimeiro: true },
+    { coluna: "due_at", ascendentePrimeiro: true },
+  ]);
+
+  const COLUNAS_LISTA = ROTULOS_LISTA.map((rotulo, indice) => ({
+    rotulo, ordem: ORDENS_DA_LISTA[indice] || null,
+  }));
   const TAMANHOS_DE_PAGINA = [25, 50, 100, 200];
   const TAMANHO_PADRAO = 50;
   const INTERVALO_NOTIFICACOES_MS = 60000;
@@ -39,6 +61,8 @@
     pagina: 1,
     porPagina: TAMANHO_PADRAO,
     total: 0,
+    // A mesma ordem que a consulta usava antes de a coluna virar clicável.
+    ordem: { coluna: "created_at", ascendente: false },
     aberta: null,
     carregando: false,
     notificacoes: [],
@@ -264,6 +288,9 @@
     if (f.semResponsavel) filtros.semResponsavel = true;
     if (f.classificacao) filtros.classificacao = f.classificacao;
     if (f.hoje) filtros.de = `${new Date().toISOString().slice(0, 10)}T00:00:00`;
+    // A ordem entra aqui, e não só na listagem: `protocolos` tem teto, e qual
+    // fatia cabe nele depende de como a lista está ordenada.
+    filtros.ordem = estado.ordem;
     return filtros;
   }
 
@@ -345,7 +372,7 @@
 
     const cabecalho = elemento("tr", {}, [
       elemento("th", { class: "col-check" }, [todas]),
-      ...COLUNAS_LISTA.map((rotulo) => elemento("th", { text: rotulo })),
+      ...COLUNAS_LISTA.map((coluna) => montarCabecalho(coluna)),
     ]);
 
     const corpo = elemento("tbody");
@@ -409,6 +436,53 @@
     );
 
     atualizarBarraDeLote();
+  }
+
+  const SETAS_DA_ORDEM = Object.freeze({ ascendente: "▲", descendente: "▼" });
+
+  /**
+   * Cabeçalho de coluna. Ordenar vai ao servidor, como os filtros: ordenar só a
+   * página desenhada responderia "as mais antigas destas 50", não as mais
+   * antigas da base — e a pessoa não teria como saber a diferença.
+   */
+  function montarCabecalho(coluna) {
+    if (!coluna.ordem) return elemento("th", { text: coluna.rotulo });
+
+    const ativa = estado.ordem.coluna === coluna.ordem.coluna;
+    const sentido = ativa && estado.ordem.ascendente ? "ascending" : ativa ? "descending" : "none";
+    const seta = ativa
+      ? (estado.ordem.ascendente ? SETAS_DA_ORDEM.ascendente : SETAS_DA_ORDEM.descendente)
+      : "";
+
+    const botao = elemento("button", {
+      class: `flow-ordenar ${ativa ? "ativa" : ""}`, type: "button",
+      // O leitor de tela precisa ouvir o que o clique vai fazer, não o que a
+      // seta já mostra.
+      "aria-label": ativa && estado.ordem.ascendente
+        ? `${coluna.rotulo} · ordenado do menor para o maior. Clique para inverter.`
+        : ativa
+          ? `${coluna.rotulo} · ordenado do maior para o menor. Clique para inverter.`
+          : `Ordenar por ${coluna.rotulo}`,
+      onclick: () => ordenarPor(coluna.ordem),
+    }, [
+      elemento("span", { text: coluna.rotulo }),
+      elemento("span", { class: "flow-ordenar-seta", "aria-hidden": "true", text: seta }),
+    ]);
+
+    return elemento("th", { "aria-sort": sentido }, [botao]);
+  }
+
+  function ordenarPor(ordem) {
+    const ativa = estado.ordem.coluna === ordem.coluna;
+    estado.ordem = {
+      coluna: ordem.coluna,
+      // Repetir a coluna inverte; trocar de coluna começa pelo sentido que faz
+      // sentido para aquele dado.
+      ascendente: ativa ? !estado.ordem.ascendente : Boolean(ordem.ascendentePrimeiro),
+    };
+    // A ordem muda o que "página 1" significa: continuar na 4 mostraria um
+    // pedaço do meio de uma lista que a pessoa acabou de reorganizar.
+    carregarSolicitacoes();
   }
 
   /** "Mostrando 51–100 de 312" — a conta que responde "cadê o resto?". */

@@ -271,6 +271,20 @@
   }
   .flow-lista-resumo strong { color: var(--text-2); }
 
+  /* Ordenação: o cabeçalho vira botão, mas continua parecendo cabeçalho. */
+  .flow-ordenar {
+    display: inline-flex; align-items: center; gap: .3rem; width: 100%;
+    padding: 0; border: none; background: none; cursor: pointer;
+    color: inherit; font: inherit; text-align: left; text-transform: inherit;
+    letter-spacing: inherit;
+  }
+  .flow-ordenar:hover { color: var(--brand-800); }
+  .flow-ordenar:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--radius-sm); }
+  .flow-ordenar.ativa { color: var(--brand-800); }
+  .flow-ordenar-seta { font-size: .62rem; line-height: 1; opacity: .85; }
+  /* Reserva o espaço da seta para o cabeçalho não pular ao ordenar. */
+  .flow-ordenar-seta::after { content: ""; display: inline-block; min-width: .55rem; }
+
   .flow-paginacao {
     display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
     margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--border-1);

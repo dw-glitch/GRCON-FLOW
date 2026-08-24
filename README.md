@@ -47,6 +47,12 @@ total do recorte e a posição sempre à vista. Todo filtro — inclusive "atras
 sobre as linhas já carregadas: numa página de 50, peneirar depois responderia
 sobre as 50 primeiras em vez de sobre a base inteira.
 
+Clicar no cabeçalho ordena, também no banco, e volta para a primeira página. O
+mesmo clique repetido inverte o sentido; trocar de coluna começa pelo sentido
+natural daquele dado — data pela mais recente, texto em A–Z. **Progresso** não
+ordena de propósito: "2 de 2" e "2 de 10" não se comparam por um número só, e
+oferecer a ordem errada é pior do que não oferecer nenhuma.
+
 A raiz `/` não é uma tela: é um roteador. Quem solicita cai no formulário, a
 equipe cai no painel — cada um já abre no seu lugar.
 

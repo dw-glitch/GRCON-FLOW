@@ -751,6 +751,37 @@ check("todo filtro do painel é aplicado no servidor", () => {
     "nenhum recorte pode voltar a ser feito depois da consulta");
 });
 
+check("ordenar por coluna vai ao servidor e é determinístico", () => {
+  // Ordenar só a página desenhada responderia "as mais antigas destas 50", não
+  // as mais antigas da base — e nada na tela denunciaria a diferença.
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /const ORDENS_DE_SOLICITACAO = Object\.freeze\(/,
+    "o nome da coluna entra na consulta: precisa vir de lista fechada");
+  assert.doesNotMatch(api, /ORDENS_DE_SOLICITACAO\[[^\]]*\]\s*\|\|\s*ordem/,
+    "coluna desconhecida cai no padrão, nunca no que a tela mandou");
+  assert.match(api, /if \(coluna !== "protocol"\) ordenada = ordenada\.order\("protocol"/,
+    "sem desempate único, a mesma linha pode cair em duas páginas ou em nenhuma");
+  assert.match(api, /nullsFirst: false/, "quem não tem prazo vai para o fim nos dois sentidos");
+
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /filtros\.ordem = estado\.ordem;/);
+  assert.match(painel, /function ordenarPor/);
+  assert.match(painel, /ascendente: ativa \? !estado\.ordem\.ascendente : Boolean\(ordem\.ascendentePrimeiro\)/,
+    "repetir a coluna inverte; trocar de coluna usa o sentido natural do dado");
+  assert.match(painel, /"aria-sort": sentido/, "leitor de tela precisa saber por onde a tabela está ordenada");
+});
+
+check("progresso não finge uma ordem que não tem", () => {
+  // "2 de 2" e "2 de 10" não se comparam por items_done; a coluna não oferece
+  // ordenação em vez de oferecer uma errada.
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /\{ coluna: "owner_name", ascendentePrimeiro: true \},\s*\n\s*null,/,
+    "a posição do progresso na lista de ordens precisa ser nula");
+  assert.match(painel, /if \(!coluna\.ordem\) return elemento\("th", \{ text: coluna\.rotulo \}\);/);
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.doesNotMatch(api, /items_done:/, "items_done não pode virar chave de ordenação");
+});
+
 check("a seleção atravessa páginas sem perder o protocolo", () => {
   const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
   assert.match(painel, /selecionadas: new Map\(\)/,

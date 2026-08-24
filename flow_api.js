@@ -329,6 +329,34 @@
   // uma consulta sem limite é um pedido de tempo limite no PostgREST.
   const TETO_DE_EXPORTACAO = 20000;
 
+  // Lista fechada: o nome da coluna vai para dentro da consulta, e o que a tela
+  // pede nunca deve poder virar SQL que ninguém previu. Progresso não está aqui
+  // de propósito — "2 de 2" e "2 de 10" não se comparam por `items_done`, e
+  // ordenar por ele venderia uma ordem que não é a que a coluna mostra.
+  const ORDENS_DE_SOLICITACAO = Object.freeze({
+    protocol: "protocol",
+    type_label: "type_label",
+    requester_name: "requester_name",
+    created_at: "created_at",
+    owner_name: "owner_name",
+    status: "status",
+    due_at: "due_at",
+  });
+
+  /**
+   * Ordena de forma determinística. O desempate por protocolo não é enfeite: sem
+   * uma ordem total, duas solicitações com o mesmo instante de criação podem
+   * aparecer em duas páginas ou em nenhuma, porque cada consulta é uma leitura
+   * nova e o banco não deve ordem estável a quem não pediu.
+   */
+  function aplicarOrdem(consulta, ordem) {
+    const coluna = ORDENS_DE_SOLICITACAO[texto(ordem && ordem.coluna)] || "created_at";
+    const ascendente = Boolean(ordem && ordem.ascendente);
+    let ordenada = consulta.order(coluna, { ascending: ascendente, nullsFirst: false });
+    if (coluna !== "protocol") ordenada = ordenada.order("protocol", { ascending: false });
+    return ordenada;
+  }
+
   /**
    * Um lugar só para os filtros do painel. `listar` e `protocolos` precisam
    * concordar sempre: se a exportação usasse outra regra, o arquivo sairia com
@@ -401,9 +429,10 @@
       const colunas = filtros.classificacao
         ? "*, filtro_itens:flow_request_items!inner(id)"
         : "*";
-      let consulta = client.from("flow_requests")
-        .select(colunas, { count: "exact" })
-        .order("created_at", { ascending: false });
+      let consulta = aplicarOrdem(
+        client.from("flow_requests").select(colunas, { count: "exact" }),
+        filtros.ordem
+      );
       consulta = aplicarFiltrosDeSolicitacao(consulta, filtros);
       const inicio = Math.max(0, Number(filtros.inicio) || 0);
       const tamanho = Math.max(1, Number(filtros.limite) || 100);
@@ -417,9 +446,7 @@
      * strings curtas, não as linhas.
      */
     async protocolos(filtros = {}) {
-      let consulta = client.from("flow_requests")
-        .select("protocol")
-        .order("created_at", { ascending: false });
+      let consulta = aplicarOrdem(client.from("flow_requests").select("protocol"), filtros.ordem);
       consulta = aplicarFiltrosDeSolicitacao(consulta, filtros);
       const { data, error } = await chamar(consulta.limit(TETO_DE_EXPORTACAO), "listar protocolos");
       if (error) return { data: [], error };
@@ -1039,5 +1066,6 @@
   root.FlowApi = Object.freeze({
     client, config, auth, tipos, solicitacoes, itens, triagem, lds, normas,
     comentarios, anexos, armazenamento, historico, notificacoes, usuarios, acesso, exportacao,
+    ORDENS_DE_SOLICITACAO,
   });
 })(window);
