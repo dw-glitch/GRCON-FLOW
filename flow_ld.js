@@ -37,6 +37,12 @@
   // ---------------------------------------------------------------------------
   // Envio de uma revisão
   // ---------------------------------------------------------------------------
+  function impedirSaida(evento) {
+    evento.preventDefault();
+    evento.returnValue = "";
+    return "";
+  }
+
   async function enviarRevisao(ld, arquivo, revisao, analise, progresso) {
     const limite = (Api.config.ldUploadMaxMb || 100) * 1024 * 1024;
     if (arquivo.size > limite) {
@@ -125,6 +131,10 @@
         if (estado.enviando) return;
         estado.enviando = true;
         publicar.disabled = true;
+        // Indexar uma LD são dezenas de lotes. Fechar a aba no meio deixa a
+        // versão parada em "processando", sem ninguém para retomá-la — por isso
+        // o navegador pergunta antes de deixar a página.
+        root.addEventListener("beforeunload", impedirSaida);
         try {
           const resultado = await enviarRevisao(ld, arquivo, revisao.value, analise, progresso);
           avisar(`${ld.code} atualizada: ${resultado.documentos.toLocaleString("pt-BR")} documentos indexados.`, "ok");
@@ -133,6 +143,7 @@
           progresso(erro.message || "Falhou.", 100);
           avisar(erro.message || "Não foi possível atualizar a LD.", "erro");
         } finally {
+          root.removeEventListener("beforeunload", impedirSaida);
           estado.enviando = false;
           validarPublicacao();
         }
@@ -357,7 +368,10 @@
           ["inativa", "pronta"].includes(versao.status) && versao.document_count > 0 ? elemento("button", {
             class: "text-button", type: "button", text: "Reativar",
             onclick: async () => {
-              if (!Ui.confirmar(`Voltar a usar esta versão de ${ld.code} nas triagens?`)) return;
+              if (!await Ui.confirmar(`Voltar a usar esta versão de ${ld.code} nas triagens?`, {
+                titulo: "Reativar versão", rotuloConfirmar: "Reativar",
+                ajuda: "A versão vigente hoje passa a inativa, sem ser apagada.",
+              })) return;
               const { error } = await Api.lds.ativarVersao(versao.id);
               if (error) { avisar(error, "erro"); return; }
               avisar("Versão reativada.", "ok");
@@ -367,7 +381,10 @@
           versao.status !== "ativa" ? elemento("button", {
             class: "text-button danger", type: "button", text: "Excluir",
             onclick: async () => {
-              if (!Ui.confirmar("Excluir esta versão e os documentos indexados dela? As triagens que a citam continuam registrando qual versão usaram.")) return;
+              if (!await Ui.confirmar("Excluir esta versão e os documentos indexados dela?", {
+                titulo: "Excluir versão da LD", rotuloConfirmar: "Excluir", rotuloCancelar: "Manter", perigo: true,
+                ajuda: "As triagens que a citam continuam registrando qual versão usaram.",
+              })) return;
               const { error } = await Api.lds.removerVersao(versao.id);
               if (error) { avisar(error, "erro"); return; }
               avisar("Versão removida.", "ok");

@@ -348,7 +348,7 @@
     const area = elemento("div", {
       class: `flow-drop ${limiteAtingido ? "cheio" : ""}`, tabindex: limiteAtingido ? "-1" : "0", role: "button",
       "aria-disabled": limiteAtingido ? "true" : "false",
-      "aria-label": "Escolher ou arrastar anexos em PDF, Excel ou Word",
+      "aria-label": `Escolher ou arrastar anexos em ${Api.anexos.formatos}`,
       onclick: () => {
         if (limiteAtingido) { avisar(`O limite é de ${maximo} anexos por solicitação.`); return; }
         entradaArquivos.click();
@@ -361,7 +361,7 @@
     }, [
       icone("upload"),
       elemento("strong", { text: limiteAtingido ? "Limite de anexos atingido" : "Arraste os anexos aqui" }),
-      elemento("span", { text: `PDF, Excel ou Word · até ${maximo} arquivos · ${Api.config.uploadMaxMb || 10} MB cada.` }),
+      elemento("span", { text: `${Api.anexos.formatos} · até ${maximo} arquivos · ${Api.config.uploadMaxMb || 10} MB cada.` }),
       entradaArquivos,
     ]);
 
@@ -458,8 +458,8 @@
       const semCodigo = !item.document;
       let corpo;
       if (editavel) {
-        const titulo = elemento("input", { type: "text", value: item.requested_title || "", placeholder: "Título ou descrição do documento", "aria-label": `Título do documento ${indice + 1}` });
-        const codigo = elemento("input", { type: "text", value: item.document || "", placeholder: "Código opcional", "aria-label": `Código do documento ${indice + 1}` });
+        const titulo = elemento("input", { id: `sol-item-titulo-${indice}`, type: "text", value: item.requested_title || "", placeholder: "Título ou descrição do documento", "aria-label": `Título do documento ${indice + 1}` });
+        const codigo = elemento("input", { id: `sol-item-codigo-${indice}`, type: "text", value: item.document || "", placeholder: "Código opcional", "aria-label": `Código do documento ${indice + 1}` });
         titulo.addEventListener("input", () => { estado.documentos[indice].requested_title = titulo.value; });
         codigo.addEventListener("change", () => {
           const atual = estado.documentos[indice];
@@ -504,14 +504,31 @@
 
     // Quem está pedindo. Vem preenchido do perfil: ninguém deveria digitar o
     // próprio nome toda vez.
+    //
+    // A equipe usa o mesmo formulário para lançar pedidos de quem ainda não tem
+    // conta. Nesse caso os campos param de dizer "seus dados" e passam a
+    // perguntar de quem é o pedido — o autor real fica no histórico.
+    const equipe = Api.auth.ehEquipe();
     blocos.push(elemento("section", { class: "flow-card" }, [
       elemento("div", { class: "flow-card-head" }, [
-        elemento("h3", { text: "Seus dados" }),
+        elemento("h3", { text: equipe ? "Dados do solicitante" : "Seus dados" }),
       ]),
+      equipe ? elemento("div", { class: "flow-aviso ok", style: "margin-bottom:.85rem" }, [
+        elemento("strong", { text: "Pedido em nome de outra pessoa" }),
+        elemento("p", { style: "margin:.2rem 0 0", text:
+          "Troque o nome, a área e o contato abaixo. A pessoa não precisa ter conta no GRCON Flow; seu usuário fica registrado no histórico como quem lançou a solicitação." }),
+      ]) : null,
       elemento("div", { class: "flow-grid" }, [
-        campoTexto("sol-nome", "Nome", { valor: estado.formulario._nome ?? (perfil.full_name || ""), obrigatorio: true }),
+        campoTexto("sol-nome", equipe ? "Nome do solicitante" : "Nome", {
+          valor: estado.formulario._nome ?? (perfil.full_name || ""), obrigatorio: true,
+        }),
         campoTexto("sol-area", "Área / setor", { valor: estado.formulario._area ?? (perfil.area || "") }),
-        campoTexto("sol-contato", "Contato", { valor: estado.formulario._contato ?? (perfil.contact || perfil.email || ""), ajuda: "E-mail ou ramal para retorno." }),
+        campoTexto("sol-contato", equipe ? "E-mail / contato do solicitante" : "Contato", {
+          valor: estado.formulario._contato ?? (perfil.contact || perfil.email || ""),
+          ajuda: equipe
+            ? "Pode ser o e-mail de quem ainda não possui cadastro no aplicativo."
+            : "E-mail ou ramal para retorno.",
+        }),
       ]),
     ]));
 
@@ -575,7 +592,15 @@
     return elemento("div", {}, blocos.concat([navegacao]));
   }
 
+  /**
+   * Copia para o estado o que está escrito na tela. Precisa rodar antes de
+   * qualquer redesenho da etapa 2: acrescentar um documento ou um anexo
+   * reconstrói o formulário inteiro e, sem esta cópia, apagaria o nome, a área,
+   * o contato, os campos do tipo e as observações que a pessoa acabou de
+   * digitar.
+   */
   function guardarFormulario() {
+    if (!estado.tipo || !document.getElementById("sol-nome")) return;
     const pegar = (id) => {
       const node = document.getElementById(id);
       return node ? node.value : "";
@@ -891,16 +916,41 @@
   }
 
   // ---------------------------------------------------------------------------
+  /** Onde estava o cursor, para devolvê-lo depois do redesenho. */
+  function marcarFoco() {
+    const ativo = document.activeElement;
+    if (!ativo || !ativo.id || ativo === document.body) return null;
+    const selecionavel = typeof ativo.setSelectionRange === "function";
+    return {
+      id: ativo.id,
+      inicio: selecionavel ? ativo.selectionStart : null,
+      fim: selecionavel ? ativo.selectionEnd : null,
+    };
+  }
+
+  function devolverFoco(marca) {
+    if (!marca) return;
+    const node = document.getElementById(marca.id);
+    if (!node || typeof node.focus !== "function") return;
+    node.focus();
+    if (marca.inicio === null || typeof node.setSelectionRange !== "function") return;
+    // Campo de data, cor e afins recusam seleção; o foco já basta.
+    try { node.setSelectionRange(marca.inicio, marca.fim); } catch (erro) { /* sem seleção */ }
+  }
+
   function render() {
     const conteudo = document.getElementById("sol-conteudo");
     const etapas = document.getElementById("sol-etapas");
     if (!conteudo) { montarPagina(); return; }
+    if (estado.etapa === 2) guardarFormulario();
+    const foco = marcarFoco();
     etapas.replaceChildren(montarEtapas());
     conteudo.replaceChildren(
       estado.etapa === 1 ? montarEscolha()
         : estado.etapa === 2 ? montarFormulario()
         : montarConferencia()
     );
+    devolverFoco(foco);
   }
 
   function montarPagina() {

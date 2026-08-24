@@ -16,11 +16,19 @@
     console.error("[GRCON Flow] flow_config.js não foi carregado. Rode `npm run build`.");
   }
 
+  // O link de "esqueci minha senha" chega com `type=recovery` no fragmento, e o
+  // supabase-js limpa a URL assim que troca o token por sessão. A leitura tem
+  // que acontecer antes de `createClient` — depois dele, o rastro já pode ter
+  // sumido e a tela mandaria a pessoa adiante ainda com a senha antiga.
+  const CHEGOU_POR_RECUPERACAO = /(^|[#&?])type=recovery([&]|$)/.test(
+    `${root.location.hash || ""}${root.location.search || ""}`
+  );
+
   const client = root.supabase.createClient(config.supabaseUrl, config.supabaseKey, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
   });
 
-  const state = { session: null, profile: null };
+  const state = { session: null, profile: null, recuperacao: CHEGOU_POR_RECUPERACAO };
   const ouvintes = new Set();
 
   function texto(valor) {
@@ -30,9 +38,12 @@
   // O bucket continua privado; esta lista define o contrato do formulário.
   // A extensão é a fonte mais estável aqui porque alguns navegadores não
   // informam o MIME de arquivos do Office (ou informam application/octet-stream).
-  const EXTENSOES_ANEXO = Object.freeze(["pdf", "xls", "xlsx", "xlsm", "doc", "docx"]);
+  // Os mesmos limites valem no banco e no bucket (migração flow_25).
+  const EXTENSOES_ANEXO = Object.freeze(["pdf", "xls", "xlsx", "xlsm", "doc", "docx", "dwg"]);
   const ACEITE_ANEXO = EXTENSOES_ANEXO.map((extensao) => `.${extensao}`).join(",");
-  const MAXIMO_ANEXOS = Math.min(5, Math.max(1, Number(config.uploadMaxFiles) || 5));
+  const TETO_ANEXOS = 30;
+  const MAXIMO_ANEXOS = Math.min(TETO_ANEXOS, Math.max(1, Number(config.uploadMaxFiles) || TETO_ANEXOS));
+  const FORMATOS_ANEXO = "PDF, Excel, Word ou DWG";
   const MIME_ANEXO = Object.freeze({
     pdf: "application/pdf",
     xls: "application/vnd.ms-excel",
@@ -40,6 +51,7 @@
     xlsm: "application/vnd.ms-excel.sheet.macroenabled.12",
     doc: "application/msword",
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    dwg: "application/acad",
   });
 
   function extensaoDoAnexo(arquivo) {
@@ -50,7 +62,7 @@
     if (!arquivo || !texto(arquivo.name)) return "Escolha um arquivo válido.";
     const extensao = extensaoDoAnexo(arquivo);
     if (!EXTENSOES_ANEXO.includes(extensao)) {
-      return `“${arquivo.name}” não é PDF, Excel ou Word.`;
+      return `“${arquivo.name}” não é ${FORMATOS_ANEXO}.`;
     }
     if (!Number(arquivo.size)) return `“${arquivo.name}” está vazio.`;
     const limiteMb = config.uploadMaxMb || 10;
@@ -74,13 +86,17 @@
     if (/User already registered/i.test(bruto)) return "Este e-mail já tem cadastro. Faça login.";
     if (/Password should be at least/i.test(bruto)) return "A senha precisa ter pelo menos 6 caracteres.";
     if (/LI\/MC.*N-1710|PDF e o Excel|PDF \+ Excel|PDF obrigatório|Excel obrigatório/i.test(bruto)) return bruto;
-    if (/Limite de 5 anexos complementares/i.test(bruto)) return "Esta solicitação já tem o limite de 5 anexos complementares.";
-    if (/Limite de 5 anexos/i.test(bruto)) return "Esta solicitação já tem o limite de 5 anexos.";
-    if (/flow_attachments_(extension|mime)_valid|mime type|formato de anexo/i.test(bruto)) {
-      return "Envie somente arquivos PDF, Word ou Excel.";
+    if (/Limite de \d+ anexos complementares/i.test(bruto)) {
+      return `Esta solicitação já tem o limite de ${MAXIMO_ANEXOS} anexos complementares.`;
     }
-    if (/flow_attachments_size_valid|maximum allowed size|mais de 10 MB/i.test(bruto)) {
-      return "Cada anexo pode ter no máximo 10 MB.";
+    if (/Limite de \d+ anexos/i.test(bruto)) {
+      return `Esta solicitação já tem o limite de ${MAXIMO_ANEXOS} anexos.`;
+    }
+    if (/flow_attachments_(extension|mime)_valid|mime type|formato de anexo/i.test(bruto)) {
+      return `Envie somente arquivos ${FORMATOS_ANEXO}.`;
+    }
+    if (/flow_attachments_size_valid|maximum allowed size|mais de \d+ MB/i.test(bruto)) {
+      return `Cada anexo pode ter no máximo ${config.uploadMaxMb || 10} MB.`;
     }
     if (/row-level security|permission denied|Sem permissão/i.test(bruto)) {
       return bruto.includes("Sem permissão") ? bruto : "Seu perfil não tem permissão para esta ação.";
@@ -99,6 +115,19 @@
       return { data, error: null };
     } catch (erro) {
       return { data: null, error: traduzErro(erro, contexto) };
+    }
+  }
+
+  /** Como `chamar`, mas preserva a contagem que o PostgREST devolve no header. */
+  async function chamarComTotal(promessa, contexto) {
+    try {
+      const { data, error, count } = await promessa;
+      if (error) return { data: [], total: 0, error: traduzErro(error, contexto) };
+      const linhas = data || [];
+      // Sem `count` pedido, o total conhecido é o que veio.
+      return { data: linhas, total: Number.isFinite(count) && count !== null ? count : linhas.length, error: null };
+    } catch (erro) {
+      return { data: [], total: 0, error: traduzErro(erro, contexto) };
     }
   }
 
@@ -133,6 +162,10 @@
     get user() { return state.session ? state.session.user : null; },
     get role() { return state.profile ? state.profile.role : null; },
 
+    /** Verdadeiro entre a chegada pelo link de recuperação e a troca da senha. */
+    get recuperandoSenha() { return state.recuperacao; },
+    concluiuRecuperacao() { state.recuperacao = false; },
+
     ehEquipe() { return ["operador", "administrador", "proprietario"].includes(auth.role); },
     ehAdmin() { return ["administrador", "proprietario"].includes(auth.role); },
     ehProprietario() { return auth.role === "proprietario"; },
@@ -143,7 +176,8 @@
       const { data } = await client.auth.getSession();
       state.session = data ? data.session : null;
       await carregarPerfil();
-      client.auth.onAuthStateChange(async (_evento, sessao) => {
+      client.auth.onAuthStateChange(async (evento, sessao) => {
+        if (evento === "PASSWORD_RECOVERY") state.recuperacao = true;
         state.session = sessao;
         await carregarPerfil();
         avisar();
@@ -185,6 +219,7 @@
 
     async definirSenha(nova) {
       const { error } = await chamar(client.auth.updateUser({ password: nova }), "definir senha");
+      if (!error) state.recuperacao = false;
       return { error };
     },
 
@@ -192,6 +227,7 @@
       await client.auth.signOut();
       state.session = null;
       state.profile = null;
+      state.recuperacao = false;
       avisar();
     },
 
@@ -282,13 +318,85 @@
   // ---------------------------------------------------------------------------
   // Solicitações
   // ---------------------------------------------------------------------------
+
+  // O banco já tria no ato da criação (`flow_create_request` devolve
+  // `triage_completed`). A tela pede a triagem logo em seguida, por hábito do
+  // fluxo antigo; guardamos o id para pular só essa repetição imediata.
+  // Reprocessamento manual pelo painel continua executando sempre.
+  const triadasNoServidor = new Set();
+
+  // Teto da exportação. Alto porque são só protocolos, e ainda assim finito:
+  // uma consulta sem limite é um pedido de tempo limite no PostgREST.
+  const TETO_DE_EXPORTACAO = 20000;
+
+  // Lista fechada: o nome da coluna vai para dentro da consulta, e o que a tela
+  // pede nunca deve poder virar SQL que ninguém previu. Progresso não está aqui
+  // de propósito — "2 de 2" e "2 de 10" não se comparam por `items_done`, e
+  // ordenar por ele venderia uma ordem que não é a que a coluna mostra.
+  const ORDENS_DE_SOLICITACAO = Object.freeze({
+    protocol: "protocol",
+    type_label: "type_label",
+    requester_name: "requester_name",
+    created_at: "created_at",
+    owner_name: "owner_name",
+    status: "status",
+    due_at: "due_at",
+  });
+
+  /**
+   * Ordena de forma determinística. O desempate por protocolo não é enfeite: sem
+   * uma ordem total, duas solicitações com o mesmo instante de criação podem
+   * aparecer em duas páginas ou em nenhuma, porque cada consulta é uma leitura
+   * nova e o banco não deve ordem estável a quem não pediu.
+   */
+  function aplicarOrdem(consulta, ordem) {
+    const coluna = ORDENS_DE_SOLICITACAO[texto(ordem && ordem.coluna)] || "created_at";
+    const ascendente = Boolean(ordem && ordem.ascendente);
+    let ordenada = consulta.order(coluna, { ascending: ascendente, nullsFirst: false });
+    if (coluna !== "protocol") ordenada = ordenada.order("protocol", { ascending: false });
+    return ordenada;
+  }
+
+  /**
+   * Um lugar só para os filtros do painel. `listar` e `protocolos` precisam
+   * concordar sempre: se a exportação usasse outra regra, o arquivo sairia com
+   * um conjunto diferente do que a pessoa está vendo.
+   */
+  function aplicarFiltrosDeSolicitacao(consultaInicial, filtros = {}) {
+    let consulta = consultaInicial;
+    if (filtros.status) consulta = consulta.eq("status", filtros.status);
+    if (filtros.tipo) consulta = consulta.eq("type_code", filtros.tipo);
+    if (filtros.responsavel) consulta = consulta.eq("owner_name", filtros.responsavel);
+    if (filtros.meus && state.session) consulta = consulta.eq("requester_id", state.session.user.id);
+    if (filtros.de) consulta = consulta.gte("created_at", filtros.de);
+    if (filtros.ate) consulta = consulta.lte("created_at", `${filtros.ate}T23:59:59`);
+    if (filtros.abertas) consulta = consulta.not("status", "in", "(concluido,cancelado)");
+    if (filtros.atrasadas) {
+      const hoje = new Date().toISOString().slice(0, 10);
+      consulta = consulta.not("status", "in", "(concluido,cancelado)").lt("due_at", hoje);
+    }
+    // A mesma expressão do contador do indicador, de propósito: o número do
+    // cartão e a lista que ele abre têm que falar do mesmo conjunto.
+    if (filtros.semResponsavel) {
+      consulta = consulta.not("status", "in", "(concluido,cancelado)").eq("owner_name", "");
+    }
+    if (filtros.classificacao) consulta = consulta.eq("filtro_itens.classification", filtros.classificacao);
+    if (filtros.busca) {
+      const termo = texto(filtros.busca).replace(/[%,()]/g, " ");
+      consulta = consulta.or(
+        `protocol.ilike.%${termo}%,requester_name.ilike.%${termo}%,summary.ilike.%${termo}%,type_label.ilike.%${termo}%`
+      );
+    }
+    return consulta;
+  }
+
   const solicitacoes = {
     /**
      * Registra a solicitação. O protocolo é gerado pelo banco, numa operação
      * atômica: dois envios simultâneos nunca recebem o mesmo número.
      */
     async criar(dados) {
-      return chamar(
+      const retorno = await chamar(
         client.rpc("flow_create_request", {
           p_type_code: dados.tipo,
           p_requester_name: texto(dados.nome),
@@ -301,25 +409,48 @@
         }),
         "registrar solicitação"
       );
+      if (retorno.data && retorno.data.triage_completed && retorno.data.id) {
+        triadasNoServidor.add(retorno.data.id);
+      }
+      return retorno;
     },
 
+    /**
+     * Devolve a página pedida e o total do recorte. Todo filtro é aplicado no
+     * servidor — inclusive os três que antes eram recortes do navegador. Peneirar
+     * depois de trazer as linhas só funcionava porque a tela trazia tudo: numa
+     * página de 50, "atrasadas" mostraria as atrasadas das 50 primeiras, não as
+     * atrasadas da base, e o total no rodapé seria uma invenção.
+     */
     async listar(filtros = {}) {
-      let consulta = client.from("flow_requests").select("*").order("created_at", { ascending: false });
-      if (filtros.status) consulta = consulta.eq("status", filtros.status);
-      if (filtros.tipo) consulta = consulta.eq("type_code", filtros.tipo);
-      if (filtros.responsavel) consulta = consulta.eq("owner_name", filtros.responsavel);
-      if (filtros.meus && state.session) consulta = consulta.eq("requester_id", state.session.user.id);
-      if (filtros.de) consulta = consulta.gte("created_at", filtros.de);
-      if (filtros.ate) consulta = consulta.lte("created_at", `${filtros.ate}T23:59:59`);
-      if (filtros.abertas) consulta = consulta.not("status", "in", "(concluido,cancelado)");
-      if (filtros.busca) {
-        const termo = texto(filtros.busca).replace(/[%,()]/g, " ");
-        consulta = consulta.or(
-          `protocol.ilike.%${termo}%,requester_name.ilike.%${termo}%,summary.ilike.%${termo}%,type_label.ilike.%${termo}%`
-        );
-      }
-      consulta = consulta.range(filtros.inicio || 0, (filtros.inicio || 0) + (filtros.limite || 100) - 1);
-      return chamar(consulta, "listar solicitações");
+      // O item guarda a classificação; a solicitação, não. O `!inner` traz só as
+      // solicitações que têm ao menos um item naquela classificação, sem repetir
+      // a linha e sem carregar os itens para a tela.
+      const colunas = filtros.classificacao
+        ? "*, filtro_itens:flow_request_items!inner(id)"
+        : "*";
+      let consulta = aplicarOrdem(
+        client.from("flow_requests").select(colunas, { count: "exact" }),
+        filtros.ordem
+      );
+      consulta = aplicarFiltrosDeSolicitacao(consulta, filtros);
+      const inicio = Math.max(0, Number(filtros.inicio) || 0);
+      const tamanho = Math.max(1, Number(filtros.limite) || 100);
+      consulta = consulta.range(inicio, inicio + tamanho - 1);
+      return chamarComTotal(consulta, "listar solicitações");
+    },
+
+    /**
+     * Só os protocolos do recorte inteiro, para a exportação não ficar presa à
+     * página que está na tela. Uma coluna e um teto alto: é uma lista de
+     * strings curtas, não as linhas.
+     */
+    async protocolos(filtros = {}) {
+      let consulta = aplicarOrdem(client.from("flow_requests").select("protocol"), filtros.ordem);
+      consulta = aplicarFiltrosDeSolicitacao(consulta, filtros);
+      const { data, error } = await chamar(consulta.limit(TETO_DE_EXPORTACAO), "listar protocolos");
+      if (error) return { data: [], error };
+      return { data: (data || []).map((linha) => linha.protocol).filter(Boolean), error: null };
     },
 
     async obter(id) {
@@ -466,6 +597,10 @@
   const triagem = {
     /** Tria a solicitação inteira. Chamada logo após o envio. */
     async solicitacao(id) {
+      if (triadasNoServidor.has(id)) {
+        triadasNoServidor.delete(id);
+        return { data: { already_triaged: true }, error: null };
+      }
       return chamar(client.rpc("flow_triage_request", { target_request: id }), "executar triagem");
     },
     async item(id) {
@@ -689,6 +824,7 @@
     extensoes: EXTENSOES_ANEXO,
     accept: ACEITE_ANEXO,
     maximo: MAXIMO_ANEXOS,
+    formatos: FORMATOS_ANEXO,
     validar: validarAnexo,
 
     async enviar(requestId, arquivo, itemId = null) {
@@ -930,5 +1066,6 @@
   root.FlowApi = Object.freeze({
     client, config, auth, tipos, solicitacoes, itens, triagem, lds, normas,
     comentarios, anexos, armazenamento, historico, notificacoes, usuarios, acesso, exportacao,
+    ORDENS_DE_SOLICITACAO,
   });
 })(window);

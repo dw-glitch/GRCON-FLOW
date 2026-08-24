@@ -16,10 +16,34 @@
   const { elemento, avisar, texto, seloClassificacao, seloStatus, seloPrazo, data: fmtData, dataHora } = Ui;
   const Api = root.FlowApi;
   const app = document.getElementById("app");
-  const COLUNAS_LISTA = (root.FlowExport && root.FlowExport.COLUNAS_PAINEL
+  const ROTULOS_LISTA = (root.FlowExport && root.FlowExport.COLUNAS_PAINEL
     ? root.FlowExport.COLUNAS_PAINEL.map((coluna) =>
       coluna.header.charAt(0) + coluna.header.slice(1).toLocaleLowerCase("pt-BR"))
     : ["Protocolo", "Tipo", "Solicitante", "Recebida", "Responsável", "Progresso", "Status", "Prazo"]);
+
+  // Cada cabeçalho e a coluna do banco por onde ele ordena, na ordem em que as
+  // células são desenhadas. `null` é coluna que não ordena: progresso é uma
+  // razão entre dois números, e ordenar por `items_done` colocaria 2 de 10 na
+  // frente de 2 de 2 — uma ordem que a coluna não mostra.
+  //
+  // Data e prazo começam pela mais recente/mais próxima; texto começa em A–Z.
+  // É o primeiro clique que a pessoa espera em cada caso.
+  const ORDENS_DA_LISTA = Object.freeze([
+    { coluna: "protocol", ascendentePrimeiro: false },
+    { coluna: "type_label", ascendentePrimeiro: true },
+    { coluna: "requester_name", ascendentePrimeiro: true },
+    { coluna: "created_at", ascendentePrimeiro: false },
+    { coluna: "owner_name", ascendentePrimeiro: true },
+    null,
+    { coluna: "status", ascendentePrimeiro: true },
+    { coluna: "due_at", ascendentePrimeiro: true },
+  ]);
+
+  const COLUNAS_LISTA = ROTULOS_LISTA.map((rotulo, indice) => ({
+    rotulo, ordem: ORDENS_DA_LISTA[indice] || null,
+  }));
+  const TAMANHOS_DE_PAGINA = [25, 50, 100, 200];
+  const TAMANHO_PADRAO = 50;
   const INTERVALO_NOTIFICACOES_MS = 60000;
   const INTERVALO_ARMAZENAMENTO_MS = 30000;
   let pararObservacaoArmazenamento = null;
@@ -31,7 +55,14 @@
     tiposPorCodigo: new Map(),
     solicitacoes: [],
     filtros: { busca: "", tipo: "", status: "", classificacao: "", indicador: "" },
-    selecionadas: new Set(),
+    // Protocolo junto do id: a seleção atravessa páginas e a exportação de
+    // "só selecionadas" precisa do protocolo de linhas que já saíram da tela.
+    selecionadas: new Map(),
+    pagina: 1,
+    porPagina: TAMANHO_PADRAO,
+    total: 0,
+    // A mesma ordem que a consulta usava antes de a coluna virar clicável.
+    ordem: { coluna: "created_at", ascendente: false },
     aberta: null,
     carregando: false,
     notificacoes: [],
@@ -245,67 +276,103 @@
   // ---------------------------------------------------------------------------
   // Lista de solicitações
   // ---------------------------------------------------------------------------
-  async function carregarSolicitacoes() {
-    const corpo = document.getElementById("painel-tabela");
-    if (corpo) Ui.carregando(corpo);
-    estado.carregando = true;
-
-    const filtros = { limite: 300 };
+  /** Os filtros da tela na forma que a camada de dados entende. */
+  function filtrosDaConsulta() {
     const f = estado.filtros;
+    const filtros = {};
     if (f.busca) filtros.busca = f.busca;
     if (f.tipo) filtros.tipo = f.tipo;
     if (f.status) filtros.status = f.status;
     if (f.abertas) filtros.abertas = true;
+    if (f.atrasadas) filtros.atrasadas = true;
+    if (f.semResponsavel) filtros.semResponsavel = true;
+    if (f.classificacao) filtros.classificacao = f.classificacao;
     if (f.hoje) filtros.de = `${new Date().toISOString().slice(0, 10)}T00:00:00`;
+    // A ordem entra aqui, e não só na listagem: `protocolos` tem teto, e qual
+    // fatia cabe nele depende de como a lista está ordenada.
+    filtros.ordem = estado.ordem;
+    return filtros;
+  }
 
-    const { data, error } = await Api.solicitacoes.listar(filtros);
+  function totalDePaginas() {
+    return Math.max(1, Math.ceil(estado.total / estado.porPagina));
+  }
+
+  /**
+   * Carrega uma página. Trocar filtro volta para a primeira: continuar na
+   * página 7 de um recorte que agora tem duas páginas mostraria uma tabela
+   * vazia, e a pessoa concluiria que o filtro não achou nada.
+   */
+  async function carregarSolicitacoes({ manterPagina = false } = {}) {
+    const corpo = document.getElementById("painel-tabela");
+    if (corpo) Ui.carregando(corpo);
+    estado.carregando = true;
+    if (!manterPagina) estado.pagina = 1;
+
+    const filtros = filtrosDaConsulta();
+    filtros.limite = estado.porPagina;
+    filtros.inicio = (estado.pagina - 1) * estado.porPagina;
+
+    const { data, total, error } = await Api.solicitacoes.listar(filtros);
     estado.carregando = false;
-    if (error) { avisar(error, "erro"); estado.solicitacoes = []; }
-    else estado.solicitacoes = data || [];
+    if (error) {
+      avisar(error, "erro");
+      estado.solicitacoes = [];
+      estado.total = 0;
+    } else {
+      estado.solicitacoes = data || [];
+      estado.total = Number(total) || 0;
+    }
 
-    // Atrasadas e "sem responsável" são recortes da lista já carregada: são
-    // perguntas sobre o prazo e sobre a atribuição, não sobre outro conjunto.
-    const hoje = new Date().toISOString().slice(0, 10);
-    if (f.atrasadas) {
-      estado.solicitacoes = estado.solicitacoes.filter((s) =>
-        s.due_at && s.due_at < hoje && !["concluido", "cancelado"].includes(s.status));
-    }
-    if (f.semResponsavel) {
-      estado.solicitacoes = estado.solicitacoes.filter((s) =>
-        !texto(s.owner_name) && !["concluido", "cancelado"].includes(s.status));
-    }
-    if (f.classificacao) {
-      // Recorte por classificação exige olhar os itens: a classificação vive
-      // neles, não na solicitação.
-      const { data: itens } = await Api.itens.listar({ classificacao: f.classificacao, limite: 500 });
-      const protocolos = new Set((itens || []).map((item) => item.solicitacao && item.solicitacao.protocol));
-      estado.solicitacoes = estado.solicitacoes.filter((s) => protocolos.has(s.protocol));
+    // A página pode ter deixado de existir enquanto ninguém olhava — outra
+    // pessoa concluiu solicitações, o recorte encolheu. Recua uma vez em vez de
+    // mostrar o vazio.
+    if (!estado.solicitacoes.length && estado.pagina > 1 && estado.total > 0) {
+      estado.pagina = Math.min(estado.pagina - 1, totalDePaginas());
+      return carregarSolicitacoes({ manterPagina: true });
     }
 
     desenharTabela();
+    return undefined;
+  }
+
+  function irParaPagina(numero) {
+    const alvo = Math.min(Math.max(1, numero), totalDePaginas());
+    if (alvo === estado.pagina) return;
+    estado.pagina = alvo;
+    carregarSolicitacoes({ manterPagina: true });
+    const tabela = document.getElementById("painel-tabela");
+    if (tabela) tabela.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function desenharTabela() {
     const destino = document.getElementById("painel-tabela");
     if (!destino) return;
     if (!estado.solicitacoes.length) {
-      Ui.vazio(destino, "Nenhuma solicitação com esses filtros",
-        "Ajuste a busca ou limpe os filtros para ver tudo que está aberto.");
+      destino.replaceChildren(elemento("div", { class: "flow-vazio" }, [
+        elemento("strong", { text: "Nenhuma solicitação com esses filtros" }),
+        elemento("span", { text: "Ajuste a busca ou limpe os filtros para ver tudo que está aberto." }),
+      ]));
+      atualizarBarraDeLote();
       return;
     }
 
+    // "Todas" é todas desta página. Marcar não apaga o que ficou selecionado nas
+    // outras: a seleção é do recorte, não da tela.
+    const todas = elemento("input", { type: "checkbox", "aria-label": "Selecionar todas as desta página" });
+    todas.checked = estado.solicitacoes.length > 0
+      && estado.solicitacoes.every((s) => estado.selecionadas.has(s.id));
+    todas.addEventListener("change", () => {
+      estado.solicitacoes.forEach((s) => {
+        if (todas.checked) estado.selecionadas.set(s.id, s.protocol);
+        else estado.selecionadas.delete(s.id);
+      });
+      desenharTabela();
+    });
+
     const cabecalho = elemento("tr", {}, [
-      elemento("th", { class: "col-check" }, [
-        elemento("input", {
-          type: "checkbox", "aria-label": "Selecionar todas",
-          onchange: (evento) => {
-            estado.selecionadas = evento.target.checked
-              ? new Set(estado.solicitacoes.map((s) => s.id)) : new Set();
-            desenharTabela();
-          },
-        }),
-      ]),
-      ...COLUNAS_LISTA.map((rotulo) => elemento("th", { text: rotulo })),
+      elemento("th", { class: "col-check" }, [todas]),
+      ...COLUNAS_LISTA.map((coluna) => montarCabecalho(coluna)),
     ]);
 
     const corpo = elemento("tbody");
@@ -314,18 +381,23 @@
       const proporcao = solicitacao.items_total > 0
         ? Math.round((solicitacao.items_done / solicitacao.items_total) * 100) : 0;
 
-      corpo.append(elemento("tr", { class: estado.selecionadas.has(solicitacao.id) ? "selecionada" : "" }, [
-        elemento("td", {}, [
-          elemento("input", {
-            type: "checkbox", "aria-label": `Selecionar ${solicitacao.protocol}`,
-            checked: estado.selecionadas.has(solicitacao.id) || null,
-            onchange: (evento) => {
-              if (evento.target.checked) estado.selecionadas.add(solicitacao.id);
-              else estado.selecionadas.delete(solicitacao.id);
-              desenharTabela();
-            },
-          }),
-        ]),
+      const marcar = elemento("input", {
+        type: "checkbox", "aria-label": `Selecionar ${solicitacao.protocol}`,
+        checked: estado.selecionadas.has(solicitacao.id) || null,
+      });
+      // Marcar uma linha não redesenha a tabela: além de custar caro, tirava o
+      // foco da caixa e quebrava o Tab de quem seleciona várias em sequência.
+      marcar.addEventListener("change", () => {
+        if (marcar.checked) estado.selecionadas.set(solicitacao.id, solicitacao.protocol);
+        else estado.selecionadas.delete(solicitacao.id);
+        linha.classList.toggle("selecionada", marcar.checked);
+        todas.checked = estado.solicitacoes.length > 0
+          && estado.solicitacoes.every((s) => estado.selecionadas.has(s.id));
+        atualizarBarraDeLote();
+      });
+
+      const linha = elemento("tr", { class: estado.selecionadas.has(solicitacao.id) ? "selecionada" : "" }, [
+        elemento("td", {}, [marcar]),
         elemento("td", {}, [
           elemento("button", {
             class: "protocolo", type: "button", text: solicitacao.protocol,
@@ -349,15 +421,115 @@
         ]),
         elemento("td", {}, [seloStatus(solicitacao.status)]),
         elemento("td", {}, [seloPrazo(solicitacao.due_at, fechada)]),
-      ]));
+      ]);
+      corpo.append(linha);
     });
 
-    destino.replaceChildren(elemento("div", { class: "flow-tabela-wrap" }, [
-      elemento("table", { class: "flow-tabela" }, [
-        elemento("thead", {}, [cabecalho]), corpo,
+    destino.replaceChildren(
+      montarResumoDaLista(),
+      elemento("div", { class: "flow-tabela-wrap" }, [
+        elemento("table", { class: "flow-tabela" }, [
+          elemento("thead", {}, [cabecalho]), corpo,
+        ]),
       ]),
-    ]));
+      montarPaginacao()
+    );
 
+    atualizarBarraDeLote();
+  }
+
+  const SETAS_DA_ORDEM = Object.freeze({ ascendente: "▲", descendente: "▼" });
+
+  /**
+   * Cabeçalho de coluna. Ordenar vai ao servidor, como os filtros: ordenar só a
+   * página desenhada responderia "as mais antigas destas 50", não as mais
+   * antigas da base — e a pessoa não teria como saber a diferença.
+   */
+  function montarCabecalho(coluna) {
+    if (!coluna.ordem) return elemento("th", { text: coluna.rotulo });
+
+    const ativa = estado.ordem.coluna === coluna.ordem.coluna;
+    const sentido = ativa && estado.ordem.ascendente ? "ascending" : ativa ? "descending" : "none";
+    const seta = ativa
+      ? (estado.ordem.ascendente ? SETAS_DA_ORDEM.ascendente : SETAS_DA_ORDEM.descendente)
+      : "";
+
+    const botao = elemento("button", {
+      class: `flow-ordenar ${ativa ? "ativa" : ""}`, type: "button",
+      // O leitor de tela precisa ouvir o que o clique vai fazer, não o que a
+      // seta já mostra.
+      "aria-label": ativa && estado.ordem.ascendente
+        ? `${coluna.rotulo} · ordenado do menor para o maior. Clique para inverter.`
+        : ativa
+          ? `${coluna.rotulo} · ordenado do maior para o menor. Clique para inverter.`
+          : `Ordenar por ${coluna.rotulo}`,
+      onclick: () => ordenarPor(coluna.ordem),
+    }, [
+      elemento("span", { text: coluna.rotulo }),
+      elemento("span", { class: "flow-ordenar-seta", "aria-hidden": "true", text: seta }),
+    ]);
+
+    return elemento("th", { "aria-sort": sentido }, [botao]);
+  }
+
+  function ordenarPor(ordem) {
+    const ativa = estado.ordem.coluna === ordem.coluna;
+    estado.ordem = {
+      coluna: ordem.coluna,
+      // Repetir a coluna inverte; trocar de coluna começa pelo sentido que faz
+      // sentido para aquele dado.
+      ascendente: ativa ? !estado.ordem.ascendente : Boolean(ordem.ascendentePrimeiro),
+    };
+    // A ordem muda o que "página 1" significa: continuar na 4 mostraria um
+    // pedaço do meio de uma lista que a pessoa acabou de reorganizar.
+    carregarSolicitacoes();
+  }
+
+  /** "Mostrando 51–100 de 312" — a conta que responde "cadê o resto?". */
+  function montarResumoDaLista() {
+    const primeira = (estado.pagina - 1) * estado.porPagina + 1;
+    const ultima = primeira + estado.solicitacoes.length - 1;
+    const selecionadas = estado.selecionadas.size;
+    return elemento("p", { class: "flow-lista-resumo" }, [
+      elemento("strong", { text: estado.total
+        ? `Mostrando ${primeira.toLocaleString("pt-BR")}–${ultima.toLocaleString("pt-BR")} de ${estado.total.toLocaleString("pt-BR")}`
+        : "Nenhuma solicitação nesse recorte" }),
+      selecionadas ? ` · ${selecionadas.toLocaleString("pt-BR")} selecionada(s) no total` : "",
+    ]);
+  }
+
+  function montarPaginacao() {
+    const paginas = totalDePaginas();
+    const tamanho = elemento("select", { id: "painel-por-pagina", "aria-label": "Solicitações por página" });
+    TAMANHOS_DE_PAGINA.forEach((valor) => {
+      const opcao = elemento("option", { value: String(valor), text: `${valor} por página` });
+      if (valor === estado.porPagina) opcao.selected = true;
+      tamanho.append(opcao);
+    });
+    tamanho.addEventListener("change", () => {
+      estado.porPagina = Number(tamanho.value) || TAMANHO_PADRAO;
+      carregarSolicitacoes();
+    });
+
+    const botao = (rotulo, destino, desabilitado, aria) => elemento("button", {
+      class: "secondary-button compact", type: "button", text: rotulo,
+      "aria-label": aria || rotulo, disabled: desabilitado || null,
+      onclick: () => irParaPagina(destino),
+    });
+
+    return elemento("div", { class: "flow-paginacao" }, [
+      tamanho,
+      elemento("span", { class: "flow-paginacao-espaco" }),
+      botao("‹‹", 1, estado.pagina <= 1, "Primeira página"),
+      botao("‹ Anterior", estado.pagina - 1, estado.pagina <= 1, "Página anterior"),
+      elemento("span", { class: "flow-paginacao-posicao", "aria-live": "polite",
+        text: `Página ${estado.pagina.toLocaleString("pt-BR")} de ${paginas.toLocaleString("pt-BR")}` }),
+      botao("Próxima ›", estado.pagina + 1, estado.pagina >= paginas, "Próxima página"),
+      botao("››", paginas, estado.pagina >= paginas, "Última página"),
+    ]);
+  }
+
+  function atualizarBarraDeLote() {
     const barra = document.getElementById("painel-lote");
     if (barra) barra.hidden = estado.selecionadas.size === 0;
     const contagem = document.getElementById("painel-lote-contagem");
@@ -368,10 +540,9 @@
   // Ficha da solicitação
   // ---------------------------------------------------------------------------
   async function abrirFicha(id) {
-    const gaveta = document.getElementById("painel-drawer");
     const corpo = document.getElementById("painel-drawer-corpo");
     const titulo = document.getElementById("painel-drawer-titulo");
-    gaveta.classList.add("aberto");
+    abrirGaveta();
     Ui.carregando(corpo);
 
     const { data, error } = await Api.solicitacoes.obter(id);
@@ -498,6 +669,11 @@
     const resposta = elemento("textarea", { id: "acao-resposta", rows: "3", placeholder: "Resposta ao solicitante — o que ele vai ler ao acompanhar." });
     resposta.value = texto(solicitacao.answer);
 
+    const botaoSalvar = elemento("button", { class: "primary-button", type: "button", text: "Salvar" });
+    const botaoReprocessar = tipo && tipo.uses_ld
+      ? elemento("button", { class: "secondary-button", type: "button", text: "Reprocessar triagem" })
+      : null;
+
     const salvar = async () => {
       const alteracoes = [
         ["status", status.value, solicitacao.status],
@@ -507,39 +683,57 @@
       ].filter(([, novo, antigo]) => texto(novo) !== texto(antigo));
 
       if (!alteracoes.length) { avisar("Nada mudou."); return; }
+      // Sem travar o botão, um duplo clique dispara a mesma alteração duas vezes
+      // e o histórico ganha um evento que nunca aconteceu.
+      botaoSalvar.disabled = true;
+      botaoSalvar.textContent = "Salvando…";
       for (const [campo, valor] of alteracoes) {
         const { error } = await Api.solicitacoes.atualizar(solicitacao.id, campo, valor, "");
-        if (error) { avisar(error, "erro"); return; }
+        if (error) {
+          botaoSalvar.disabled = false;
+          botaoSalvar.textContent = "Salvar";
+          avisar(error, "erro");
+          return;
+        }
       }
       avisar("Solicitação atualizada.", "ok");
       abrirFicha(solicitacao.id);
-      carregarSolicitacoes();
+      carregarSolicitacoes({ manterPagina: true });
       montarIndicadores(document.getElementById("painel-indicadores"));
     };
 
     const reprocessar = async () => {
       if (!tipo || !tipo.uses_ld) { avisar("Este tipo não usa consulta às LDs."); return; }
+      if (botaoReprocessar) { botaoReprocessar.disabled = true; botaoReprocessar.textContent = "Reprocessando…"; }
       avisar("Reprocessando com as LDs vigentes…");
       const { error } = await Api.triagem.solicitacao(solicitacao.id);
+      if (botaoReprocessar) { botaoReprocessar.disabled = false; botaoReprocessar.textContent = "Reprocessar triagem"; }
       if (error) { avisar(error, "erro"); return; }
       avisar("Triagem reprocessada. O resultado anterior foi preservado no histórico.", "ok");
       abrirFicha(solicitacao.id);
     };
 
-    const excluir = async (evento) => {
-      const protocolo = texto(solicitacao.protocol).toUpperCase();
-      const digitado = root.prompt(
-        `A exclusão é permanente e remove itens, histórico, comentários e anexos.\n\nPara continuar, digite o protocolo ${protocolo}:`,
-        ""
-      );
-      if (digitado === null) return;
-      if (texto(digitado).toUpperCase() !== protocolo) {
-        avisar("Protocolo diferente. A solicitação não foi excluída.", "erro");
-        return;
-      }
-      if (!Ui.confirmar(`Excluir permanentemente ${protocolo}? Esta ação não pode ser desfeita.`)) return;
+    botaoSalvar.addEventListener("click", salvar);
+    if (botaoReprocessar) botaoReprocessar.addEventListener("click", reprocessar);
 
+    const excluir = async (evento) => {
       const botao = evento.currentTarget;
+      const protocolo = texto(solicitacao.protocol).toUpperCase();
+      // Uma caixa só, que mostra o que vai sumir e só libera o botão quando o
+      // protocolo confere. O par prompt+confirm perguntava duas vezes e, na
+      // segunda, já não dizia de qual solicitação estava falando.
+      const confirmado = await Ui.confirmar(
+        `Excluir permanentemente ${protocolo}?\n\nSaem junto os itens, as triagens, o histórico, os comentários e os anexos. Não há como desfazer.`,
+        {
+          titulo: "Excluir solicitação",
+          rotuloConfirmar: "Excluir permanentemente",
+          rotuloCancelar: "Manter",
+          perigo: true,
+          exigirTexto: protocolo,
+        }
+      );
+      if (!confirmado) return;
+
       botao.disabled = true;
       botao.textContent = "Excluindo…";
       const { error } = await Api.solicitacoes.excluir(solicitacao.id, solicitacao.anexos || []);
@@ -551,10 +745,9 @@
       }
 
       estado.selecionadas.delete(solicitacao.id);
-      estado.aberta = null;
-      document.getElementById("painel-drawer").classList.remove("aberto");
+      fecharGaveta();
       avisar(`${protocolo} excluída permanentemente.`, "ok");
-      await carregarSolicitacoes();
+      await carregarSolicitacoes({ manterPagina: true });
       const indicadores = document.getElementById("painel-indicadores");
       if (indicadores) montarIndicadores(indicadores);
       montarArmazenamento(document.getElementById("painel-armazenamento"));
@@ -578,10 +771,8 @@
         ]),
       ]),
       elemento("div", { class: "flow-acoes", style: "margin-top:.9rem" }, [
-        elemento("button", { class: "primary-button", type: "button", text: "Salvar", onclick: salvar }),
-        tipo && tipo.uses_ld
-          ? elemento("button", { class: "secondary-button", type: "button", text: "Reprocessar triagem", onclick: reprocessar })
-          : null,
+        botaoSalvar,
+        botaoReprocessar,
         Api.auth.ehAdmin()
           ? elemento("button", { class: "danger-button", type: "button", text: "Excluir solicitação", onclick: excluir })
           : null,
@@ -629,13 +820,26 @@
           disabled: itens.some((item) => item.requires_pdf_excel_pair && !(item.pdf_attachment_ready && item.excel_attachment_ready)) || null,
           title: itens.some((item) => item.requires_pdf_excel_pair && !(item.pdf_attachment_ready && item.excel_attachment_ready))
             ? "Complete o PDF + Excel dos itens LI/MC antes de concluir." : "",
-          onclick: async () => {
-            if (!Ui.confirmar("Marcar todos os itens desta solicitação como concluídos?")) return;
+          onclick: async (evento) => {
+            // `currentTarget` é anulado assim que o manipulador cede a vez; a
+            // caixa de confirmação agora é assíncrona, então o botão é guardado
+            // antes de perguntar.
+            const botaoConcluir = evento.currentTarget;
+            if (!await Ui.confirmar("Marcar todos os itens desta solicitação como concluídos?", {
+              titulo: "Concluir itens", rotuloConfirmar: "Concluir todos",
+            })) return;
+            botaoConcluir.disabled = true;
+            botaoConcluir.textContent = "Concluindo…";
             const { error } = await Api.itens.atualizar(itens.map((i) => i.id), "status", "concluido", "Concluído em lote pela ficha");
-            if (error) { avisar(error, "erro"); return; }
+            if (error) {
+              botaoConcluir.disabled = false;
+              botaoConcluir.textContent = "Concluir todos os itens";
+              avisar(error, "erro");
+              return;
+            }
             avisar("Itens concluídos.", "ok");
             abrirFicha(solicitacao.id);
-            carregarSolicitacoes();
+            carregarSolicitacoes({ manterPagina: true });
           },
         }),
       ]),
@@ -733,7 +937,10 @@
           elemento("button", {
             class: "secondary-button compact", type: "button", text: "É este",
             onclick: async () => {
-              if (!Ui.confirmar(`Confirmar ${candidato.document} como o código deste item?`)) return;
+              if (!await Ui.confirmar(
+                `Confirmar ${candidato.document} como o código deste item?\n\n${candidato.title || ""}`.trim(),
+                { titulo: "Confirmar código", rotuloConfirmar: "É este", ajuda: "O item será triado de novo com o código confirmado." }
+              )) return;
               const { error } = await Api.itens.atualizar([item.id], "document", candidato.document,
                 "Código confirmado pelo operador a partir dos candidatos por título");
               if (error) { avisar(error, "erro"); return; }
@@ -812,7 +1019,8 @@
       elemento("div", { class: "flow-acoes", style: "margin-top:.9rem" }, [
         elemento("button", {
           class: "primary-button", type: "button", text: "Salvar item",
-          onclick: async () => {
+          onclick: async (evento) => {
+            const botaoItem = evento.currentTarget;
             const alteracoes = [
               ["status", status.value, item.status],
               ["owner_name", responsavel.value, item.owner_name],
@@ -827,9 +1035,16 @@
               ["observations", observacoes.value, item.observations],
             ].filter(([, novo, antigo]) => texto(novo) !== texto(antigo));
             if (!alteracoes.length) { avisar("Nada mudou."); return; }
+            botaoItem.disabled = true;
+            botaoItem.textContent = "Salvando…";
             for (const [campo, valor] of alteracoes) {
               const { error } = await Api.itens.atualizar([item.id], campo, valor, "");
-              if (error) { avisar(error, "erro"); return; }
+              if (error) {
+                botaoItem.disabled = false;
+                botaoItem.textContent = "Salvar item";
+                avisar(error, "erro");
+                return;
+              }
             }
             avisar("Item atualizado.", "ok");
             abrirFicha(item.request_id);
@@ -962,17 +1177,20 @@
     let descricao = "registros visíveis no painel";
 
     if (escopo === "selecionadas") {
-      const protocolos = estado.solicitacoes
-        .filter((s) => estado.selecionadas.has(s.id)).map((s) => s.protocol);
+      // As selecionadas podem estar espalhadas por várias páginas; por isso o
+      // protocolo viaja junto do id na seleção.
+      const protocolos = [...estado.selecionadas.values()].filter(Boolean);
       if (!protocolos.length) { avisar("Selecione ao menos uma solicitação.", "erro"); return; }
       filtros.protocolos = protocolos;
       descricao = `${protocolos.length} solicitação(ões) selecionada(s)`;
     } else if (escopo === "filtro") {
-      // Inclui busca, indicadores e recortes feitos no navegador: o arquivo
-      // recebe exatamente os protocolos que a pessoa está vendo na tabela.
-      filtros.protocolos = estado.solicitacoes.map((s) => s.protocol);
-      if (!filtros.protocolos.length) { avisar("Não há solicitações visíveis para exportar.", "erro"); return; }
-      descricao = `${filtros.protocolos.length} solicitação(ões) visível(is) no painel`;
+      // O recorte inteiro, não a página que está na tela: exportar 50 de 312
+      // porque a tabela mostra 50 seria uma armadilha silenciosa.
+      const { data: protocolos, error: erroProtocolos } = await Api.solicitacoes.protocolos(filtrosDaConsulta());
+      if (erroProtocolos) { avisar(erroProtocolos, "erro"); return; }
+      if (!protocolos.length) { avisar("Não há solicitações nesse recorte para exportar.", "erro"); return; }
+      filtros.protocolos = protocolos;
+      descricao = `${protocolos.length} solicitação(ões) do recorte atual do painel`;
     }
 
     const { data, error } = await Api.exportacao.linhas(filtros);
@@ -1044,56 +1262,130 @@
     Object.entries(Ui.STATUS).forEach(([valor, rotulo]) => status.append(elemento("option", { value: valor, text: rotulo })));
 
     const responsavel = elemento("input", { id: "lote-responsavel", type: "text", placeholder: "Nome", autocomplete: "off" });
+    const andamento = elemento("span", { id: "painel-lote-andamento", class: "flow-lote-andamento", hidden: true, role: "status", "aria-live": "polite" });
+    const botao = elemento("button", { class: "secondary-button compact", type: "button", text: "Aplicar aos selecionados" });
 
+    /**
+     * Uma alteração em lote é uma chamada por solicitação. Antes, o primeiro
+     * erro abortava o restante em silêncio e a tela ainda dizia "0 selecionadas"
+     * — quem tentasse repetir não sabia o que já tinha sido aplicado. Agora o
+     * lote vai até o fim, conta o que passou, e mantém selecionado exatamente o
+     * que falhou.
+     */
     const aplicar = async () => {
-      const ids = [...estado.selecionadas];
+      const ids = [...estado.selecionadas.keys()];
       if (!ids.length) return;
       const tarefas = [];
       if (status.value) tarefas.push(["status", status.value]);
       if (texto(responsavel.value)) tarefas.push(["owner_name", responsavel.value]);
       if (!tarefas.length) { avisar("Escolha o que aplicar.", "erro"); return; }
-      for (const id of ids) {
+
+      botao.disabled = true;
+      status.disabled = true;
+      responsavel.disabled = true;
+      andamento.hidden = false;
+
+      const falhas = [];
+      let concluidas = 0;
+      for (let indice = 0; indice < ids.length; indice += 1) {
+        const id = ids[indice];
+        andamento.textContent = `Aplicando ${indice + 1} de ${ids.length}…`;
+        let erroDoItem = null;
         for (const [campo, valor] of tarefas) {
           const { error } = await Api.solicitacoes.atualizar(id, campo, valor, "Alteração em lote pelo painel");
-          if (error) { avisar(error, "erro"); return; }
+          if (error) { erroDoItem = error; break; }
         }
+        if (erroDoItem) falhas.push({ id, erro: erroDoItem });
+        else concluidas += 1;
       }
-      avisar(`${ids.length} solicitação(ões) atualizada(s).`, "ok");
-      estado.selecionadas = new Set();
-      status.value = ""; responsavel.value = "";
-      carregarSolicitacoes();
+
+      botao.disabled = false;
+      status.disabled = false;
+      responsavel.disabled = false;
+      andamento.hidden = true;
+      andamento.textContent = "";
+
+      if (falhas.length) {
+        // O que falhou continua marcado: a próxima tentativa já vem no alvo.
+        const restantes = new Map();
+        falhas.forEach((falha) => restantes.set(falha.id, estado.selecionadas.get(falha.id) || ""));
+        estado.selecionadas = restantes;
+        avisar(`${concluidas} atualizada(s), ${falhas.length} falharam: ${falhas[0].erro}`, "erro");
+      } else {
+        estado.selecionadas = new Map();
+        status.value = ""; responsavel.value = "";
+        avisar(`${concluidas} solicitação(ões) atualizada(s).`, "ok");
+      }
+      // O lote muda status: a página atual continua sendo a mesma pergunta.
+      carregarSolicitacoes({ manterPagina: true });
       montarIndicadores(document.getElementById("painel-indicadores"));
     };
+
+    botao.addEventListener("click", aplicar);
 
     return elemento("div", { class: "flow-lote", id: "painel-lote", hidden: true }, [
       elemento("strong", { id: "painel-lote-contagem", text: "0 selecionada(s)" }),
       elemento("label", { class: "flow-campo", for: "lote-status" }, [elemento("span", { text: "Novo status" }), status]),
       elemento("label", { class: "flow-campo", for: "lote-responsavel" }, [elemento("span", { text: "Responsável" }), responsavel]),
-      elemento("button", { class: "secondary-button compact", type: "button", text: "Aplicar aos selecionados", onclick: aplicar }),
+      botao,
+      elemento("button", {
+        class: "text-button", type: "button", text: "Limpar seleção",
+        onclick: () => { estado.selecionadas = new Map(); desenharTabela(); },
+      }),
+      andamento,
     ]);
+  }
+
+  /**
+   * A ficha abre por cima do painel. Fechá-la precisa devolver o foco ao
+   * protocolo que a abriu — sem isso, quem usa teclado volta ao topo da página e
+   * perde o lugar na lista — e a página de trás não pode rolar junto.
+   */
+  let focoAntesDaFicha = null;
+
+  function abrirGaveta() {
+    const gaveta = document.getElementById("painel-drawer");
+    if (!gaveta) return;
+    if (!gaveta.classList.contains("aberto")) focoAntesDaFicha = document.activeElement;
+    gaveta.classList.add("aberto");
+    document.body.classList.add("p1-modal-open");
+    const painel = gaveta.querySelector(".flow-drawer-painel");
+    if (painel) painel.focus();
+  }
+
+  function fecharGaveta() {
+    const gaveta = document.getElementById("painel-drawer");
+    if (!gaveta || !gaveta.classList.contains("aberto")) return;
+    gaveta.classList.remove("aberto");
+    document.body.classList.remove("p1-modal-open");
+    estado.aberta = null;
+    if (focoAntesDaFicha && focoAntesDaFicha.isConnected && typeof focoAntesDaFicha.focus === "function") {
+      focoAntesDaFicha.focus();
+    }
+    focoAntesDaFicha = null;
   }
 
   function montarDrawer() {
     const gaveta = elemento("div", { class: "flow-drawer", id: "painel-drawer" }, [
-      elemento("div", { class: "flow-drawer-painel", role: "dialog", "aria-modal": "true", "aria-label": "Ficha da solicitação" }, [
+      elemento("div", {
+        class: "flow-drawer-painel", role: "dialog", "aria-modal": "true",
+        "aria-label": "Ficha da solicitação", tabindex: "-1",
+      }, [
         elemento("div", { class: "flow-drawer-head" }, [
           elemento("div", { style: "flex:1;min-width:0" }, [
             elemento("h2", { id: "painel-drawer-titulo", text: "—" }),
             elemento("p", { id: "painel-drawer-sub", text: "" }),
           ]),
-          elemento("button", {
-            class: "text-button", type: "button", text: "Fechar",
-            onclick: () => gaveta.classList.remove("aberto"),
-          }),
+          elemento("button", { class: "text-button", type: "button", text: "Fechar", onclick: fecharGaveta }),
         ]),
         elemento("div", { class: "flow-drawer-corpo", id: "painel-drawer-corpo" }),
       ]),
     ]);
     gaveta.addEventListener("click", (evento) => {
-      if (evento.target === gaveta) gaveta.classList.remove("aberto");
+      if (evento.target === gaveta) fecharGaveta();
     });
     document.addEventListener("keydown", (evento) => {
-      if (evento.key === "Escape") gaveta.classList.remove("aberto");
+      if (evento.key === "Escape") fecharGaveta();
     });
     return gaveta;
   }
@@ -1286,7 +1578,9 @@
 
   async function excluirNotificacao(notificacao) {
     if (estado.notificacaoExcluindoId || estado.notificacoesExcluindoTodas) return;
-    if (!Ui.confirmar("Excluir esta notificação permanentemente?")) return;
+    if (!await Ui.confirmar("Excluir esta notificação permanentemente?", {
+      titulo: "Excluir notificação", rotuloConfirmar: "Excluir", rotuloCancelar: "Manter", perigo: true,
+    })) return;
     estado.notificacaoExcluindoId = notificacao.id;
     desenharNotificacoes();
     const { error } = await Api.notificacoes.excluir(notificacao.id);
@@ -1304,7 +1598,9 @@
 
   async function excluirTodasNotificacoes() {
     if (estado.notificacaoExcluindoId || estado.notificacoesExcluindoTodas) return;
-    if (!Ui.confirmar("Excluir permanentemente todas as suas notificações?")) return;
+    if (!await Ui.confirmar("Excluir permanentemente todas as suas notificações?", {
+      titulo: "Limpar a caixa", rotuloConfirmar: "Excluir todas", rotuloCancelar: "Manter", perigo: true,
+    })) return;
     estado.notificacoesExcluindoTodas = true;
     desenharNotificacoes();
     const { error } = await Api.notificacoes.excluirTodas();
@@ -1366,13 +1662,33 @@
   }
 
   const ABAS = [
-    { chave: "solicitacoes", rotulo: "Solicitações" },
-    { chave: "lds", rotulo: "Base de LDs", admin: true },
-    { chave: "normas", rotulo: "Normas e códigos", admin: true },
-    { chave: "tipos", rotulo: "Tipos de solicitação", admin: true },
-    { chave: "usuarios", rotulo: "Usuários", admin: true },
-    { chave: "acesso", rotulo: "Acesso", admin: true },
+    { chave: "solicitacoes", rotulo: "Solicitações", titulo: "Solicitações" },
+    { chave: "lds", rotulo: "Base de LDs", titulo: "Base de LDs", admin: true },
+    { chave: "normas", rotulo: "Normas e códigos", titulo: "Normas e códigos", admin: true },
+    { chave: "tipos", rotulo: "Tipos de solicitação", titulo: "Tipos de solicitação", admin: true },
+    { chave: "usuarios", rotulo: "Usuários", titulo: "Usuários", admin: true },
+    { chave: "acesso", rotulo: "Acesso", titulo: "Quem pode entrar", admin: true },
   ];
+
+  /** A aba visível vira parte do endereço: atualizar a página, voltar pelo
+   *  navegador ou mandar o link a um colega passam a cair no mesmo lugar. */
+  function abaDaUrl() {
+    const pedida = texto(new URLSearchParams(root.location.search).get("aba"));
+    const conhecida = ABAS.find((aba) => aba.chave === pedida);
+    if (!conhecida) return "solicitacoes";
+    if (conhecida.admin && !Api.auth.ehAdmin()) return "solicitacoes";
+    return conhecida.chave;
+  }
+
+  function guardarAbaNaUrl(substituir = false) {
+    const parametros = new URLSearchParams(root.location.search);
+    if (estado.aba === "solicitacoes") parametros.delete("aba");
+    else parametros.set("aba", estado.aba);
+    const busca = parametros.toString();
+    const destino = root.location.pathname + (busca ? `?${busca}` : "");
+    if (substituir) root.history.replaceState({ aba: estado.aba }, "", destino);
+    else root.history.pushState({ aba: estado.aba }, "", destino);
+  }
 
   function renderAba() {
     const conteudo = document.getElementById("painel-conteudo");
@@ -1380,6 +1696,11 @@
     document.querySelectorAll("[data-aba]").forEach((botao) => {
       botao.setAttribute("aria-selected", botao.dataset.aba === estado.aba ? "true" : "false");
     });
+    // O título da página é a única referência de "onde estou" quando a lista
+    // rola e as abas saem da vista.
+    const titulo = document.getElementById("painel-titulo");
+    const aba = ABAS.find((item) => item.chave === estado.aba);
+    if (titulo && aba) titulo.textContent = aba.titulo;
 
     pararAtualizacaoArmazenamento();
     if (estado.aba === "solicitacoes") {
@@ -1426,7 +1747,12 @@
         class: "flow-aba", type: "button", role: "tab", "data-aba": aba.chave,
         "aria-selected": aba.chave === estado.aba ? "true" : "false",
         text: aba.rotulo,
-        onclick: () => { estado.aba = aba.chave; renderAba(); },
+        onclick: () => {
+          if (estado.aba === aba.chave) return;
+          estado.aba = aba.chave;
+          guardarAbaNaUrl();
+          renderAba();
+        },
       }))
     );
 
@@ -1434,7 +1760,7 @@
       Ui.montarTopo({ ativo: "painel", subtitulo: "Painel operacional" }),
       elemento("main", { class: "flow-main largo" }, [
         elemento("div", { class: "flow-page-head" }, [
-          elemento("h1", { text: "Solicitações" }),
+          elemento("h1", { id: "painel-titulo", text: "Solicitações" }),
           montarCentralNotificacoes(),
         ]),
         abas,
@@ -1444,7 +1770,9 @@
       Ui.montarRodape()
     );
     renderAba();
-    carregarSolicitacoes();
+    // Abrir direto em outra aba não deve custar uma consulta de solicitações
+    // que ninguém vai ver.
+    if (estado.aba === "solicitacoes") carregarSolicitacoes();
   }
 
   (async function iniciar() {
@@ -1453,7 +1781,16 @@
     const { data } = await Api.tipos.listar({ incluirInativos: true });
     estado.tipos = data || [];
     estado.tiposPorCodigo = new Map(estado.tipos.map((tipo) => [tipo.code, tipo]));
+    estado.aba = abaDaUrl();
     montarPagina();
+    guardarAbaNaUrl(true);
+    root.addEventListener("popstate", () => {
+      const alvo = abaDaUrl();
+      if (alvo === estado.aba) return;
+      estado.aba = alvo;
+      renderAba();
+      if (estado.aba === "solicitacoes") carregarSolicitacoes();
+    });
     const pararNotificacoes = Api.notificacoes.assinar((notificacao) => {
       avisar(texto(notificacao.title) || "Nova solicitação recebida.", "ok");
       if (!estado.notificacoes.some((item) => item.id === notificacao.id)) {
@@ -1464,7 +1801,7 @@
         desenharNotificacoes();
       }
       if (estado.aba === "solicitacoes") {
-        carregarSolicitacoes();
+        carregarSolicitacoes({ manterPagina: true });
         const indicadores = document.getElementById("painel-indicadores");
         if (indicadores) montarIndicadores(indicadores);
       }
