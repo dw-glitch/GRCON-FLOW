@@ -270,6 +270,22 @@
     margin: 0 0 .55rem; font-size: .78rem; color: var(--text-3);
   }
   .flow-lista-resumo strong { color: var(--text-2); }
+
+  .flow-paginacao {
+    display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+    margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--border-1);
+  }
+  .flow-paginacao select {
+    flex: 0 0 auto; width: auto; min-height: 2.25rem; padding: .35rem .6rem;
+    border: 1px solid var(--border-1); border-radius: var(--radius-sm);
+    background: var(--surface-1); color: var(--text-1); font-size: .8rem;
+  }
+  .flow-paginacao-espaco { flex: 1; }
+  .flow-paginacao-posicao {
+    padding: 0 .5rem; font-size: .8rem; font-weight: 650; color: var(--text-2);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .flow-paginacao button:disabled { opacity: .45; cursor: not-allowed; }
   .flow-lote-andamento { font-size: .78rem; color: var(--text-3); }
 
   .flow-lote { margin-top: var(--space-3); padding: .7rem .8rem; border: 1px solid var(--border-1); border-radius: var(--radius-sm); background: var(--surface-2); }
@@ -589,6 +605,9 @@
     .flow-armazenamento { grid-template-columns: 1fr; gap: .45rem; }
     .flow-armazenamento-detalhe { white-space: normal; }
     .flow-tabela-wrap { max-height: none; }
+    .flow-paginacao { justify-content: center; }
+    .flow-paginacao-espaco { display: none; }
+    .flow-paginacao select { flex: 1 1 100%; }
     .flow-footer { justify-content: center; text-align: center; }
   }
 }

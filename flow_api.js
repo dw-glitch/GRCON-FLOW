@@ -118,6 +118,19 @@
     }
   }
 
+  /** Como `chamar`, mas preserva a contagem que o PostgREST devolve no header. */
+  async function chamarComTotal(promessa, contexto) {
+    try {
+      const { data, error, count } = await promessa;
+      if (error) return { data: [], total: 0, error: traduzErro(error, contexto) };
+      const linhas = data || [];
+      // Sem `count` pedido, o total conhecido é o que veio.
+      return { data: linhas, total: Number.isFinite(count) && count !== null ? count : linhas.length, error: null };
+    } catch (erro) {
+      return { data: [], total: 0, error: traduzErro(erro, contexto) };
+    }
+  }
+
   function avisar() {
     ouvintes.forEach((fn) => {
       try { fn(state.session, state.profile); } catch (erro) { console.error(erro); }
@@ -312,6 +325,43 @@
   // Reprocessamento manual pelo painel continua executando sempre.
   const triadasNoServidor = new Set();
 
+  // Teto da exportação. Alto porque são só protocolos, e ainda assim finito:
+  // uma consulta sem limite é um pedido de tempo limite no PostgREST.
+  const TETO_DE_EXPORTACAO = 20000;
+
+  /**
+   * Um lugar só para os filtros do painel. `listar` e `protocolos` precisam
+   * concordar sempre: se a exportação usasse outra regra, o arquivo sairia com
+   * um conjunto diferente do que a pessoa está vendo.
+   */
+  function aplicarFiltrosDeSolicitacao(consultaInicial, filtros = {}) {
+    let consulta = consultaInicial;
+    if (filtros.status) consulta = consulta.eq("status", filtros.status);
+    if (filtros.tipo) consulta = consulta.eq("type_code", filtros.tipo);
+    if (filtros.responsavel) consulta = consulta.eq("owner_name", filtros.responsavel);
+    if (filtros.meus && state.session) consulta = consulta.eq("requester_id", state.session.user.id);
+    if (filtros.de) consulta = consulta.gte("created_at", filtros.de);
+    if (filtros.ate) consulta = consulta.lte("created_at", `${filtros.ate}T23:59:59`);
+    if (filtros.abertas) consulta = consulta.not("status", "in", "(concluido,cancelado)");
+    if (filtros.atrasadas) {
+      const hoje = new Date().toISOString().slice(0, 10);
+      consulta = consulta.not("status", "in", "(concluido,cancelado)").lt("due_at", hoje);
+    }
+    // A mesma expressão do contador do indicador, de propósito: o número do
+    // cartão e a lista que ele abre têm que falar do mesmo conjunto.
+    if (filtros.semResponsavel) {
+      consulta = consulta.not("status", "in", "(concluido,cancelado)").eq("owner_name", "");
+    }
+    if (filtros.classificacao) consulta = consulta.eq("filtro_itens.classification", filtros.classificacao);
+    if (filtros.busca) {
+      const termo = texto(filtros.busca).replace(/[%,()]/g, " ");
+      consulta = consulta.or(
+        `protocol.ilike.%${termo}%,requester_name.ilike.%${termo}%,summary.ilike.%${termo}%,type_label.ilike.%${termo}%`
+      );
+    }
+    return consulta;
+  }
+
   const solicitacoes = {
     /**
      * Registra a solicitação. O protocolo é gerado pelo banco, numa operação
@@ -337,23 +387,43 @@
       return retorno;
     },
 
+    /**
+     * Devolve a página pedida e o total do recorte. Todo filtro é aplicado no
+     * servidor — inclusive os três que antes eram recortes do navegador. Peneirar
+     * depois de trazer as linhas só funcionava porque a tela trazia tudo: numa
+     * página de 50, "atrasadas" mostraria as atrasadas das 50 primeiras, não as
+     * atrasadas da base, e o total no rodapé seria uma invenção.
+     */
     async listar(filtros = {}) {
-      let consulta = client.from("flow_requests").select("*").order("created_at", { ascending: false });
-      if (filtros.status) consulta = consulta.eq("status", filtros.status);
-      if (filtros.tipo) consulta = consulta.eq("type_code", filtros.tipo);
-      if (filtros.responsavel) consulta = consulta.eq("owner_name", filtros.responsavel);
-      if (filtros.meus && state.session) consulta = consulta.eq("requester_id", state.session.user.id);
-      if (filtros.de) consulta = consulta.gte("created_at", filtros.de);
-      if (filtros.ate) consulta = consulta.lte("created_at", `${filtros.ate}T23:59:59`);
-      if (filtros.abertas) consulta = consulta.not("status", "in", "(concluido,cancelado)");
-      if (filtros.busca) {
-        const termo = texto(filtros.busca).replace(/[%,()]/g, " ");
-        consulta = consulta.or(
-          `protocol.ilike.%${termo}%,requester_name.ilike.%${termo}%,summary.ilike.%${termo}%,type_label.ilike.%${termo}%`
-        );
-      }
-      consulta = consulta.range(filtros.inicio || 0, (filtros.inicio || 0) + (filtros.limite || 100) - 1);
-      return chamar(consulta, "listar solicitações");
+      // O item guarda a classificação; a solicitação, não. O `!inner` traz só as
+      // solicitações que têm ao menos um item naquela classificação, sem repetir
+      // a linha e sem carregar os itens para a tela.
+      const colunas = filtros.classificacao
+        ? "*, filtro_itens:flow_request_items!inner(id)"
+        : "*";
+      let consulta = client.from("flow_requests")
+        .select(colunas, { count: "exact" })
+        .order("created_at", { ascending: false });
+      consulta = aplicarFiltrosDeSolicitacao(consulta, filtros);
+      const inicio = Math.max(0, Number(filtros.inicio) || 0);
+      const tamanho = Math.max(1, Number(filtros.limite) || 100);
+      consulta = consulta.range(inicio, inicio + tamanho - 1);
+      return chamarComTotal(consulta, "listar solicitações");
+    },
+
+    /**
+     * Só os protocolos do recorte inteiro, para a exportação não ficar presa à
+     * página que está na tela. Uma coluna e um teto alto: é uma lista de
+     * strings curtas, não as linhas.
+     */
+    async protocolos(filtros = {}) {
+      let consulta = client.from("flow_requests")
+        .select("protocol")
+        .order("created_at", { ascending: false });
+      consulta = aplicarFiltrosDeSolicitacao(consulta, filtros);
+      const { data, error } = await chamar(consulta.limit(TETO_DE_EXPORTACAO), "listar protocolos");
+      if (error) return { data: [], error };
+      return { data: (data || []).map((linha) => linha.protocol).filter(Boolean), error: null };
     },
 
     async obter(id) {

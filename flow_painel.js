@@ -20,7 +20,8 @@
     ? root.FlowExport.COLUNAS_PAINEL.map((coluna) =>
       coluna.header.charAt(0) + coluna.header.slice(1).toLocaleLowerCase("pt-BR"))
     : ["Protocolo", "Tipo", "Solicitante", "Recebida", "Responsável", "Progresso", "Status", "Prazo"]);
-  const LIMITE_DA_LISTA = 300;
+  const TAMANHOS_DE_PAGINA = [25, 50, 100, 200];
+  const TAMANHO_PADRAO = 50;
   const INTERVALO_NOTIFICACOES_MS = 60000;
   const INTERVALO_ARMAZENAMENTO_MS = 30000;
   let pararObservacaoArmazenamento = null;
@@ -32,8 +33,12 @@
     tiposPorCodigo: new Map(),
     solicitacoes: [],
     filtros: { busca: "", tipo: "", status: "", classificacao: "", indicador: "" },
-    selecionadas: new Set(),
-    listaTruncada: false,
+    // Protocolo junto do id: a seleção atravessa páginas e a exportação de
+    // "só selecionadas" precisa do protocolo de linhas que já saíram da tela.
+    selecionadas: new Map(),
+    pagina: 1,
+    porPagina: TAMANHO_PADRAO,
+    total: 0,
     aberta: null,
     carregando: false,
     notificacoes: [],
@@ -247,64 +252,94 @@
   // ---------------------------------------------------------------------------
   // Lista de solicitações
   // ---------------------------------------------------------------------------
-  async function carregarSolicitacoes() {
-    const corpo = document.getElementById("painel-tabela");
-    if (corpo) Ui.carregando(corpo);
-    estado.carregando = true;
-
-    const filtros = { limite: LIMITE_DA_LISTA };
+  /** Os filtros da tela na forma que a camada de dados entende. */
+  function filtrosDaConsulta() {
     const f = estado.filtros;
+    const filtros = {};
     if (f.busca) filtros.busca = f.busca;
     if (f.tipo) filtros.tipo = f.tipo;
     if (f.status) filtros.status = f.status;
     if (f.abertas) filtros.abertas = true;
+    if (f.atrasadas) filtros.atrasadas = true;
+    if (f.semResponsavel) filtros.semResponsavel = true;
+    if (f.classificacao) filtros.classificacao = f.classificacao;
     if (f.hoje) filtros.de = `${new Date().toISOString().slice(0, 10)}T00:00:00`;
+    return filtros;
+  }
 
-    const { data, error } = await Api.solicitacoes.listar(filtros);
+  function totalDePaginas() {
+    return Math.max(1, Math.ceil(estado.total / estado.porPagina));
+  }
+
+  /**
+   * Carrega uma página. Trocar filtro volta para a primeira: continuar na
+   * página 7 de um recorte que agora tem duas páginas mostraria uma tabela
+   * vazia, e a pessoa concluiria que o filtro não achou nada.
+   */
+  async function carregarSolicitacoes({ manterPagina = false } = {}) {
+    const corpo = document.getElementById("painel-tabela");
+    if (corpo) Ui.carregando(corpo);
+    estado.carregando = true;
+    if (!manterPagina) estado.pagina = 1;
+
+    const filtros = filtrosDaConsulta();
+    filtros.limite = estado.porPagina;
+    filtros.inicio = (estado.pagina - 1) * estado.porPagina;
+
+    const { data, total, error } = await Api.solicitacoes.listar(filtros);
     estado.carregando = false;
-    if (error) { avisar(error, "erro"); estado.solicitacoes = []; }
-    else estado.solicitacoes = data || [];
-    // A consulta tem teto. Sem dizê-lo, a tabela cheia parece a lista inteira e
-    // quem procura uma solicitação antiga conclui que ela sumiu.
-    estado.listaTruncada = estado.solicitacoes.length >= LIMITE_DA_LISTA;
+    if (error) {
+      avisar(error, "erro");
+      estado.solicitacoes = [];
+      estado.total = 0;
+    } else {
+      estado.solicitacoes = data || [];
+      estado.total = Number(total) || 0;
+    }
 
-    // Atrasadas e "sem responsável" são recortes da lista já carregada: são
-    // perguntas sobre o prazo e sobre a atribuição, não sobre outro conjunto.
-    const hoje = new Date().toISOString().slice(0, 10);
-    if (f.atrasadas) {
-      estado.solicitacoes = estado.solicitacoes.filter((s) =>
-        s.due_at && s.due_at < hoje && !["concluido", "cancelado"].includes(s.status));
-    }
-    if (f.semResponsavel) {
-      estado.solicitacoes = estado.solicitacoes.filter((s) =>
-        !texto(s.owner_name) && !["concluido", "cancelado"].includes(s.status));
-    }
-    if (f.classificacao) {
-      // Recorte por classificação exige olhar os itens: a classificação vive
-      // neles, não na solicitação.
-      const { data: itens } = await Api.itens.listar({ classificacao: f.classificacao, limite: 500 });
-      const protocolos = new Set((itens || []).map((item) => item.solicitacao && item.solicitacao.protocol));
-      estado.solicitacoes = estado.solicitacoes.filter((s) => protocolos.has(s.protocol));
+    // A página pode ter deixado de existir enquanto ninguém olhava — outra
+    // pessoa concluiu solicitações, o recorte encolheu. Recua uma vez em vez de
+    // mostrar o vazio.
+    if (!estado.solicitacoes.length && estado.pagina > 1 && estado.total > 0) {
+      estado.pagina = Math.min(estado.pagina - 1, totalDePaginas());
+      return carregarSolicitacoes({ manterPagina: true });
     }
 
     desenharTabela();
+    return undefined;
+  }
+
+  function irParaPagina(numero) {
+    const alvo = Math.min(Math.max(1, numero), totalDePaginas());
+    if (alvo === estado.pagina) return;
+    estado.pagina = alvo;
+    carregarSolicitacoes({ manterPagina: true });
+    const tabela = document.getElementById("painel-tabela");
+    if (tabela) tabela.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function desenharTabela() {
     const destino = document.getElementById("painel-tabela");
     if (!destino) return;
     if (!estado.solicitacoes.length) {
-      Ui.vazio(destino, "Nenhuma solicitação com esses filtros",
-        "Ajuste a busca ou limpe os filtros para ver tudo que está aberto.");
+      destino.replaceChildren(elemento("div", { class: "flow-vazio" }, [
+        elemento("strong", { text: "Nenhuma solicitação com esses filtros" }),
+        elemento("span", { text: "Ajuste a busca ou limpe os filtros para ver tudo que está aberto." }),
+      ]));
+      atualizarBarraDeLote();
       return;
     }
 
-    const todas = elemento("input", { type: "checkbox", "aria-label": "Selecionar todas" });
+    // "Todas" é todas desta página. Marcar não apaga o que ficou selecionado nas
+    // outras: a seleção é do recorte, não da tela.
+    const todas = elemento("input", { type: "checkbox", "aria-label": "Selecionar todas as desta página" });
     todas.checked = estado.solicitacoes.length > 0
       && estado.solicitacoes.every((s) => estado.selecionadas.has(s.id));
     todas.addEventListener("change", () => {
-      estado.selecionadas = todas.checked
-        ? new Set(estado.solicitacoes.map((s) => s.id)) : new Set();
+      estado.solicitacoes.forEach((s) => {
+        if (todas.checked) estado.selecionadas.set(s.id, s.protocol);
+        else estado.selecionadas.delete(s.id);
+      });
       desenharTabela();
     });
 
@@ -326,7 +361,7 @@
       // Marcar uma linha não redesenha a tabela: além de custar caro, tirava o
       // foco da caixa e quebrava o Tab de quem seleciona várias em sequência.
       marcar.addEventListener("change", () => {
-        if (marcar.checked) estado.selecionadas.add(solicitacao.id);
+        if (marcar.checked) estado.selecionadas.set(solicitacao.id, solicitacao.protocol);
         else estado.selecionadas.delete(solicitacao.id);
         linha.classList.toggle("selecionada", marcar.checked);
         todas.checked = estado.solicitacoes.length > 0
@@ -364,20 +399,60 @@
     });
 
     destino.replaceChildren(
-      elemento("p", { class: "flow-lista-resumo" }, [
-        elemento("strong", { text: `${estado.solicitacoes.length} solicitação(ões)` }),
-        estado.listaTruncada
-          ? ` · mostrando as ${LIMITE_DA_LISTA} mais recentes desse recorte. Use a busca ou os filtros para alcançar as demais.`
-          : " nesse recorte.",
-      ]),
+      montarResumoDaLista(),
       elemento("div", { class: "flow-tabela-wrap" }, [
         elemento("table", { class: "flow-tabela" }, [
           elemento("thead", {}, [cabecalho]), corpo,
         ]),
-      ])
+      ]),
+      montarPaginacao()
     );
 
     atualizarBarraDeLote();
+  }
+
+  /** "Mostrando 51–100 de 312" — a conta que responde "cadê o resto?". */
+  function montarResumoDaLista() {
+    const primeira = (estado.pagina - 1) * estado.porPagina + 1;
+    const ultima = primeira + estado.solicitacoes.length - 1;
+    const selecionadas = estado.selecionadas.size;
+    return elemento("p", { class: "flow-lista-resumo" }, [
+      elemento("strong", { text: estado.total
+        ? `Mostrando ${primeira.toLocaleString("pt-BR")}–${ultima.toLocaleString("pt-BR")} de ${estado.total.toLocaleString("pt-BR")}`
+        : "Nenhuma solicitação nesse recorte" }),
+      selecionadas ? ` · ${selecionadas.toLocaleString("pt-BR")} selecionada(s) no total` : "",
+    ]);
+  }
+
+  function montarPaginacao() {
+    const paginas = totalDePaginas();
+    const tamanho = elemento("select", { id: "painel-por-pagina", "aria-label": "Solicitações por página" });
+    TAMANHOS_DE_PAGINA.forEach((valor) => {
+      const opcao = elemento("option", { value: String(valor), text: `${valor} por página` });
+      if (valor === estado.porPagina) opcao.selected = true;
+      tamanho.append(opcao);
+    });
+    tamanho.addEventListener("change", () => {
+      estado.porPagina = Number(tamanho.value) || TAMANHO_PADRAO;
+      carregarSolicitacoes();
+    });
+
+    const botao = (rotulo, destino, desabilitado, aria) => elemento("button", {
+      class: "secondary-button compact", type: "button", text: rotulo,
+      "aria-label": aria || rotulo, disabled: desabilitado || null,
+      onclick: () => irParaPagina(destino),
+    });
+
+    return elemento("div", { class: "flow-paginacao" }, [
+      tamanho,
+      elemento("span", { class: "flow-paginacao-espaco" }),
+      botao("‹‹", 1, estado.pagina <= 1, "Primeira página"),
+      botao("‹ Anterior", estado.pagina - 1, estado.pagina <= 1, "Página anterior"),
+      elemento("span", { class: "flow-paginacao-posicao", "aria-live": "polite",
+        text: `Página ${estado.pagina.toLocaleString("pt-BR")} de ${paginas.toLocaleString("pt-BR")}` }),
+      botao("Próxima ›", estado.pagina + 1, estado.pagina >= paginas, "Próxima página"),
+      botao("››", paginas, estado.pagina >= paginas, "Última página"),
+    ]);
   }
 
   function atualizarBarraDeLote() {
@@ -549,7 +624,7 @@
       }
       avisar("Solicitação atualizada.", "ok");
       abrirFicha(solicitacao.id);
-      carregarSolicitacoes();
+      carregarSolicitacoes({ manterPagina: true });
       montarIndicadores(document.getElementById("painel-indicadores"));
     };
 
@@ -594,7 +669,7 @@
       estado.selecionadas.delete(solicitacao.id);
       fecharGaveta();
       avisar(`${protocolo} excluída permanentemente.`, "ok");
-      await carregarSolicitacoes();
+      await carregarSolicitacoes({ manterPagina: true });
       const indicadores = document.getElementById("painel-indicadores");
       if (indicadores) montarIndicadores(indicadores);
       montarArmazenamento(document.getElementById("painel-armazenamento"));
@@ -681,7 +756,7 @@
             }
             avisar("Itens concluídos.", "ok");
             abrirFicha(solicitacao.id);
-            carregarSolicitacoes();
+            carregarSolicitacoes({ manterPagina: true });
           },
         }),
       ]),
@@ -1016,17 +1091,20 @@
     let descricao = "registros visíveis no painel";
 
     if (escopo === "selecionadas") {
-      const protocolos = estado.solicitacoes
-        .filter((s) => estado.selecionadas.has(s.id)).map((s) => s.protocol);
+      // As selecionadas podem estar espalhadas por várias páginas; por isso o
+      // protocolo viaja junto do id na seleção.
+      const protocolos = [...estado.selecionadas.values()].filter(Boolean);
       if (!protocolos.length) { avisar("Selecione ao menos uma solicitação.", "erro"); return; }
       filtros.protocolos = protocolos;
       descricao = `${protocolos.length} solicitação(ões) selecionada(s)`;
     } else if (escopo === "filtro") {
-      // Inclui busca, indicadores e recortes feitos no navegador: o arquivo
-      // recebe exatamente os protocolos que a pessoa está vendo na tabela.
-      filtros.protocolos = estado.solicitacoes.map((s) => s.protocol);
-      if (!filtros.protocolos.length) { avisar("Não há solicitações visíveis para exportar.", "erro"); return; }
-      descricao = `${filtros.protocolos.length} solicitação(ões) visível(is) no painel`;
+      // O recorte inteiro, não a página que está na tela: exportar 50 de 312
+      // porque a tabela mostra 50 seria uma armadilha silenciosa.
+      const { data: protocolos, error: erroProtocolos } = await Api.solicitacoes.protocolos(filtrosDaConsulta());
+      if (erroProtocolos) { avisar(erroProtocolos, "erro"); return; }
+      if (!protocolos.length) { avisar("Não há solicitações nesse recorte para exportar.", "erro"); return; }
+      filtros.protocolos = protocolos;
+      descricao = `${protocolos.length} solicitação(ões) do recorte atual do painel`;
     }
 
     const { data, error } = await Api.exportacao.linhas(filtros);
@@ -1109,7 +1187,7 @@
      * que falhou.
      */
     const aplicar = async () => {
-      const ids = [...estado.selecionadas];
+      const ids = [...estado.selecionadas.keys()];
       if (!ids.length) return;
       const tarefas = [];
       if (status.value) tarefas.push(["status", status.value]);
@@ -1143,14 +1221,17 @@
 
       if (falhas.length) {
         // O que falhou continua marcado: a próxima tentativa já vem no alvo.
-        estado.selecionadas = new Set(falhas.map((falha) => falha.id));
+        const restantes = new Map();
+        falhas.forEach((falha) => restantes.set(falha.id, estado.selecionadas.get(falha.id) || ""));
+        estado.selecionadas = restantes;
         avisar(`${concluidas} atualizada(s), ${falhas.length} falharam: ${falhas[0].erro}`, "erro");
       } else {
-        estado.selecionadas = new Set();
+        estado.selecionadas = new Map();
         status.value = ""; responsavel.value = "";
         avisar(`${concluidas} solicitação(ões) atualizada(s).`, "ok");
       }
-      carregarSolicitacoes();
+      // O lote muda status: a página atual continua sendo a mesma pergunta.
+      carregarSolicitacoes({ manterPagina: true });
       montarIndicadores(document.getElementById("painel-indicadores"));
     };
 
@@ -1163,7 +1244,7 @@
       botao,
       elemento("button", {
         class: "text-button", type: "button", text: "Limpar seleção",
-        onclick: () => { estado.selecionadas = new Set(); desenharTabela(); },
+        onclick: () => { estado.selecionadas = new Map(); desenharTabela(); },
       }),
       andamento,
     ]);
@@ -1630,7 +1711,7 @@
         desenharNotificacoes();
       }
       if (estado.aba === "solicitacoes") {
-        carregarSolicitacoes();
+        carregarSolicitacoes({ manterPagina: true });
         const indicadores = document.getElementById("painel-indicadores");
         if (indicadores) montarIndicadores(indicadores);
       }

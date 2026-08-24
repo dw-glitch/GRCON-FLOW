@@ -220,11 +220,20 @@ check("itens repetidos viram uma única linha de solicitação com progresso cor
     "data sem hora não pode voltar um dia por causa do fuso do computador");
 });
 
-check("a exportação filtrada usa exatamente os protocolos visíveis", () => {
+check("a exportação filtrada cobre o recorte inteiro, não a página na tela", () => {
+  // Com paginação, exportar o que está desenhado entregaria 50 de 312 sem avisar.
+  // A garantia de não divergir é as duas pontas passarem pelo mesmo montador de
+  // filtros — na tela e na camada de dados.
   const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
-  assert.match(painel, /filtros\.protocolos = estado\.solicitacoes\.map/);
-  assert.doesNotMatch(painel, /if \(estado\.filtros\.tipo\) \{ filtros\.tipo/,
-    "reconstruir apenas parte dos filtros faria o Excel divergir da tela");
+  assert.match(painel, /Api\.solicitacoes\.protocolos\(filtrosDaConsulta\(\)\)/);
+  assert.match(painel, /filtros\.limite = estado\.porPagina/,
+    "a listagem usa o mesmo recorte, só que paginado");
+  assert.doesNotMatch(painel, /filtros\.protocolos = estado\.solicitacoes\.map/,
+    "exportar a página visível volta a ser uma armadilha silenciosa");
+
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  const usos = api.match(/aplicarFiltrosDeSolicitacao\(consulta, filtros\)/g) || [];
+  assert.equal(usos.length, 2, "listar e protocolos precisam aplicar os mesmos filtros");
 });
 
 check("a planilha usa a mesma logo oficial do aplicativo", () => {
@@ -696,7 +705,7 @@ check("alteração em lote vai até o fim e diz o que falhou", () => {
   const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
   assert.match(painel, /falhas\.push\(\{ id, erro: erroDoItem \}\)/,
     "o primeiro erro não pode abortar o restante em silêncio");
-  assert.match(painel, /estado\.selecionadas = new Set\(falhas\.map/,
+  assert.match(painel, /falhas\.forEach\(\(falha\) => restantes\.set\(falha\.id/,
     "o que falhou continua selecionado para a próxima tentativa");
   assert.match(painel, /botao\.disabled = true;/, "o botão trava enquanto o lote roda");
   assert.match(painel, /Aplicando \$\{indice \+ 1\} de/, "o progresso precisa ser visível");
@@ -711,11 +720,45 @@ check("a ficha trava o botão enquanto salva e devolve o foco ao fechar", () => 
   assert.match(painel, /document\.body\.classList\.add\("p1-modal-open"\)/);
 });
 
-check("a lista do painel diz quando está mostrando só um pedaço", () => {
+check("o painel pagina de verdade, com total vindo do servidor", () => {
   const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
-  assert.match(painel, /LIMITE_DA_LISTA = 300/);
-  assert.match(painel, /estado\.listaTruncada/);
-  assert.match(painel, /mostrando as \$\{LIMITE_DA_LISTA\} mais recentes/);
+  assert.match(painel, /filtros\.inicio = \(estado\.pagina - 1\) \* estado\.porPagina/);
+  assert.match(painel, /estado\.total = Number\(total\) \|\| 0/,
+    "o total é do recorte inteiro, não do que veio na página");
+  assert.match(painel, /Mostrando \$\{primeira/);
+  assert.match(painel, /function irParaPagina/);
+  assert.match(painel, /if \(!manterPagina\) estado\.pagina = 1;/,
+    "trocar filtro precisa voltar para a primeira página");
+
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /\{ count: "exact" \}/, "sem contagem exata não há número de páginas");
+  assert.match(api, /async function chamarComTotal/);
+});
+
+check("todo filtro do painel é aplicado no servidor", () => {
+  // Peneirar no navegador depois de trazer as linhas só funcionava porque a tela
+  // trazia tudo: numa página de 50, "atrasadas" mostraria as atrasadas das 50
+  // primeiras — e o total no rodapé seria ficção.
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /if \(filtros\.atrasadas\)/);
+  assert.match(api, /if \(filtros\.semResponsavel\)/);
+  assert.match(api, /filtro_itens:flow_request_items!inner\(id\)/,
+    "a classificação vive no item; o inner join traz a solicitação sem repetir a linha");
+  assert.match(api, /eq\("filtro_itens\.classification", filtros\.classificacao\)/);
+
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.doesNotMatch(painel, /estado\.solicitacoes = estado\.solicitacoes\.filter/,
+    "nenhum recorte pode voltar a ser feito depois da consulta");
+});
+
+check("a seleção atravessa páginas sem perder o protocolo", () => {
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /selecionadas: new Map\(\)/,
+    "só o id não basta: a exportação precisa do protocolo de linhas que saíram da tela");
+  assert.match(painel, /estado\.selecionadas\.set\(solicitacao\.id, solicitacao\.protocol\)/);
+  assert.match(painel, /\[\.\.\.estado\.selecionadas\.values\(\)\]/);
+  assert.doesNotMatch(painel, /estado\.selecionadas = new Set\(/,
+    "trocar de página não pode zerar o que já estava marcado");
 });
 
 check("o solicitante abre o próprio pedido sem copiar o protocolo à mão", () => {

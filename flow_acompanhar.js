@@ -189,7 +189,8 @@
     if (protocoloDaUrl) { entrada.value = protocoloDaUrl; consultarProtocolo(protocoloDaUrl, resultado); }
 
     root.FlowUi.carregando(minhas);
-    const { data, error } = await Api.solicitacoes.listar({ meus: true, limite: 50 });
+    const LIMITE = 50;
+    const { data, total, error } = await Api.solicitacoes.listar({ meus: true, limite: LIMITE });
     if (error) { root.FlowUi.vazio(minhas, "Não foi possível carregar", error); return; }
     if (!data.length) {
       root.FlowUi.vazio(minhas, "Você ainda não registrou nenhuma solicitação",
@@ -197,8 +198,9 @@
       return;
     }
     minhas.replaceChildren(
-      elemento("p", { class: "flow-lista-resumo", text:
-        `${data.length} solicitação(ões)${data.length >= 50 ? " · mostrando as 50 mais recentes" : ""}.` }),
+      elemento("p", { class: "flow-lista-resumo", text: total > data.length
+        ? `${total} solicitação(ões) · mostrando as ${data.length} mais recentes. Use a busca por protocolo para as demais.`
+        : `${total} solicitação(ões).` }),
       ...data.map((solicitacao) => cartaoSolicitacao(solicitacao, abrirProtocolo))
     );
   }

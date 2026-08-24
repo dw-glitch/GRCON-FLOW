@@ -41,6 +41,12 @@ Histórico completo · Exportação do Controle de Solicitações
 | `/acompanhar` | quem solicitou | Consulta pelo protocolo e lista os próprios pedidos. |
 | `/painel` | equipe de qualidade | Dashboard, triagem, distribuição, Base de LDs, tipos, usuários e acesso. |
 
+A lista do painel é paginada no servidor: 25, 50, 100 ou 200 por página, com o
+total do recorte e a posição sempre à vista. Todo filtro — inclusive "atrasadas",
+"sem responsável" e os recortes por classificação — é aplicado no banco, e não
+sobre as linhas já carregadas: numa página de 50, peneirar depois responderia
+sobre as 50 primeiras em vez de sobre a base inteira.
+
 A raiz `/` não é uma tela: é um roteador. Quem solicita cai no formulário, a
 equipe cai no painel — cada um já abre no seu lugar.
 
@@ -168,6 +174,11 @@ seu próprio ciclo de revisão.
 
 Filtros por tipo, status, responsável, solicitante, período, classificação ou
 apenas os itens selecionados.
+
+**Exportar painel** leva o recorte inteiro, não a página que está na tela: se o
+filtro tem 312 solicitações e a tabela mostra 50, o arquivo sai com as 312. A
+seleção também atravessa páginas — marcar três na primeira e duas na quarta
+exporta cinco.
 
 ---
 
