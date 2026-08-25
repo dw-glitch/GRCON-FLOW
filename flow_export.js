@@ -62,10 +62,22 @@
   // A prioridade vem logo depois do protocolo porque é o que mais muda a ordem
   // de leitura da linha. Na planilha ela precisa ser coluna: a faixa vermelha
   // que o painel desenha não sobrevive a um arquivo do Excel.
+  // Vazio para o que não tem resposta — a solicitação sem triagem e o tipo que
+  // não consulta LD. Uma coluna que escreve "não aplicável" em toda linha de
+  // Impressão gasta a atenção de quem procura as que importam.
+  const ORIGEM_LEGIVEL = Object.freeze({
+    novo: "NOVO",
+    previsto: "JÁ PREVISTO",
+    misto: "MISTO",
+    a_confirmar: "A CONFIRMAR",
+    nao_aplicavel: "",
+  });
+
   const COLUNAS_PAINEL = Object.freeze([
     { header: "PROTOCOLO", key: "protocol", width: 21 },
     { header: "PRIORIDADE", key: "priority", width: 14 },
     { header: "TIPO", key: "type", width: 31 },
+    { header: "ORIGEM", key: "origin", width: 16 },
     { header: "SOLICITANTE", key: "requester", width: 28 },
     { header: "RECEBIDA", key: "received", width: 15 },
     { header: "RESPONSÁVEL", key: "owner", width: 24 },
@@ -146,6 +158,10 @@
           // em 90% das linhas esconde as poucas que importam.
           priority: PRIORIDADE_LEGIVEL[prioridadeCodigo] || "",
           type: texto(registro.type_label),
+          // A bifurcação do controle em papel: NOVO ou JÁ PREVISTO. Sai por
+          // extenso porque na planilha ninguém pode passar o mouse por cima de
+          // um selo para descobrir o que ele quer dizer.
+          origin: ORIGEM_LEGIVEL[texto(registro.request_origin)] || "",
           requester: [texto(registro.requester_name), texto(registro.requester_area)].filter(Boolean).join("\n"),
           received: dataBR(registro.received_at),
           owner: texto(registro.owner_name) || "—",

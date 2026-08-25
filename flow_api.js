@@ -340,6 +340,7 @@
     created_at: "created_at",
     owner_name: "owner_name",
     priority: "priority",
+    origin: "origin",
     status: "status",
     due_at: "due_at",
   });
@@ -382,6 +383,10 @@
       consulta = consulta.not("status", "in", "(concluido,cancelado)").eq("owner_name", "");
     }
     if (filtros.classificacao) consulta = consulta.eq("filtro_itens.classification", filtros.classificacao);
+    // A origem é coluna da própria solicitação desde a flow_30, agregada dos
+    // itens pelo banco. Por isso não precisa do `!inner` da classificação: é
+    // igualdade simples, ordena, e o total do rodapé não depende de embed.
+    if (filtros.origem) consulta = consulta.eq("origin", filtros.origem);
     // "urgentes" é o recorte que a equipe abre pelo cartão do indicador: só o
     // que está em aberto, porque urgência de pedido concluído não é fila.
     if (filtros.urgentes) {
@@ -1079,6 +1084,7 @@
       if (filtros.responsavel) consulta = consulta.eq("owner_name", filtros.responsavel);
       if (filtros.solicitante) consulta = consulta.eq("requester_name", filtros.solicitante);
       if (filtros.classificacao) consulta = consulta.eq("classification", filtros.classificacao);
+      if (filtros.origem) consulta = consulta.eq("request_origin", filtros.origem);
       if (filtros.de) consulta = consulta.gte("received_at", filtros.de);
       if (filtros.ate) consulta = consulta.lte("received_at", `${filtros.ate}T23:59:59`);
       if (filtros.abertas) consulta = consulta.not("request_status", "in", "(concluido,cancelado)");

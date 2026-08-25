@@ -51,6 +51,11 @@ Há filtro por prioridade e um cartão de urgentes em aberto, e a coluna
 **Prioridade** fica logo depois do protocolo, porque é o que mais muda a ordem de
 leitura da linha.
 
+A coluna **Origem** responde a bifurcação central do controle em papel — NOVO ou
+JÁ PREVISTO — e tem filtro próprio. Ela não é digitada por ninguém: sai da
+triagem, que já grava em cada item se o documento consta nas LDs vigentes, e o
+banco resume isso por solicitação a cada mudança de item.
+
 Clicar no cabeçalho ordena, também no banco, e volta para a primeira página. O
 mesmo clique repetido inverte o sentido; trocar de coluna começa pelo sentido
 natural daquele dado — data pela mais recente, texto em A–Z. **Progresso** não
@@ -112,6 +117,30 @@ Toda pergunta do aplicativo é da própria tela — nenhuma sai pelo `confirm` d
 navegador, que trava a aba, ignora o tema, não cabe em tela pequena e não sabe
 dizer o que está sendo apagado. A caixa devolve o foco de onde veio, prende o
 Tab e, quando não há nada a digitar, começa com o cursor em "Cancelar".
+
+### Origem: NOVO × JÁ PREVISTO
+
+A folha de controle separava a demanda em dois caminhos depois da triagem. O
+aplicativo responde sozinho, e com duas respostas a mais — que são justamente as
+que dão trabalho:
+
+| Origem | Quando |
+| --- | --- |
+| `novo` | Nenhum documento do pedido consta nas LDs vigentes. |
+| `previsto` | Todos já constam. O status vem do SIGEM. |
+| `misto` | O pedido tem documento novo **e** documento já previsto. |
+| `a_confirmar` | Algum documento ainda está sem código confirmado. |
+| `nao_aplicavel` | Tipo de serviço que não consulta LD. |
+
+`a_confirmar` tem precedência sobre os demais de propósito: enquanto um item do
+pedido não tem código confirmado, ele pode virar qualquer um dos dois caminhos.
+Dizer "JÁ PREVISTO" porque os outros dois já existem esconderia exatamente o
+documento que ainda dá trabalho. Por isso também o primeiro clique na coluna
+traz `a_confirmar` ao topo.
+
+As cores são as que o cliente desenhou: verde para novo, azul para já previsto.
+Como na urgência, a cor é reforço — a palavra está escrita no selo e vai por
+extenso para a planilha.
 
 ### Classificações
 

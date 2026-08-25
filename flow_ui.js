@@ -118,6 +118,68 @@
     return elemento("span", { class: `flow-selo ${info.classe}`, text: info.rotulo });
   }
 
+  /**
+   * A bifurcação do plano do cliente: NOVO × JÁ PREVISTO.
+   *
+   * Ele desenhou dois caminhos. A triagem responde com mais nuance, e as duas
+   * respostas a mais não são preciosismo — são as que dão trabalho:
+   *
+   * - `misto`       o pedido tem documento novo e documento já previsto. Na
+   *                 folha dele isso obrigaria a partir a demanda em duas; aqui
+   *                 o pedido segue inteiro e a coluna avisa que ele anda pelos
+   *                 dois caminhos.
+   * - `a_confirmar` algum documento chegou sem código confirmado. Não é um
+   *                 terceiro caminho: é a ausência de resposta, dita em voz
+   *                 alta em vez de ser arredondada para um dos dois lados.
+   *
+   * `nao_aplicavel` é o tipo de serviço que não consulta LD (Impressão,
+   * Consulta). Perguntar se é novo não faz sentido ali.
+   */
+  const ORIGENS = Object.freeze({
+    novo:          Object.freeze({ rotulo: "NOVO",        classe: "origem-novo",     descricao: "Não consta nas LDs vigentes — o caminho é incluir, alocar e enviar." }),
+    previsto:      Object.freeze({ rotulo: "JÁ PREVISTO", classe: "origem-previsto", descricao: "Já consta nas LDs vigentes — o status vem do SIGEM." }),
+    misto:         Object.freeze({ rotulo: "MISTO",       classe: "origem-misto",    descricao: "O pedido tem documento novo e documento já previsto." }),
+    a_confirmar:   Object.freeze({ rotulo: "A CONFIRMAR", classe: "origem-confirmar", descricao: "Algum documento ainda está sem código confirmado; até lá o caminho não está decidido." }),
+    nao_aplicavel: Object.freeze({ rotulo: "—",           classe: "neutro",          descricao: "Este tipo de solicitação não consulta a LD." }),
+  });
+
+  function rotuloOrigem(valor) {
+    const info = ORIGENS[texto(valor)];
+    return info ? info.rotulo : "—";
+  }
+
+  /**
+   * Selo da origem. Devolve null quando não há resposta — e são dois "sem
+   * resposta" diferentes: a solicitação sem triagem nenhuma (`""`) e o tipo que
+   * não consulta LD (`nao_aplicavel`, que já traz "—" como rótulo). Nos dois
+   * casos a célula fica com o traço da tabela, e não com um selo vazio.
+   */
+  function seloOrigem(valor) {
+    const chave = texto(valor);
+    const info = ORIGENS[chave];
+    if (!info || chave === "nao_aplicavel") return null;
+    return elemento("span", { class: `flow-selo ${info.classe}`, text: info.rotulo, title: info.descricao });
+  }
+
+  /**
+   * A presença em LD do item, que é de onde a origem da solicitação sai. O
+   * vocabulário é o da coluna `ld_presence_status`, restrita no banco desde a
+   * flow_25 — a tela não inventa valor que o banco não aceita.
+   */
+  const PRESENCAS_EM_LD = Object.freeze({
+    NOVO:                   "NOVO — não consta nas LDs",
+    JA_EXISTE:              "JÁ PREVISTO — consta nas LDs",
+    JA_EXISTE_DIVERGENTE:   "JÁ PREVISTO — com divergência entre LDs",
+    PENDENTE_IDENTIFICACAO: "A CONFIRMAR — código não identificado",
+    POSSIVEL_EXISTENTE:     "A CONFIRMAR — possível correspondência por título",
+    NAO_APLICAVEL:          "Não se aplica a este tipo",
+    NAO_AVALIADO:           "Ainda não avaliado",
+  });
+
+  function rotuloPresencaEmLd(valor) {
+    return PRESENCAS_EM_LD[texto(valor)] || "—";
+  }
+
   const PAPEIS = {
     solicitante: "Solicitante",
     operador: "Operador",
@@ -601,8 +663,10 @@
   root.FlowUi = Object.freeze({
     $, $$, elemento, esc, texto,
     CLASSIFICACOES, STATUS, PAPEIS, PRIORIDADES, PRIORIDADE_PADRAO,
+    ORIGENS, PRESENCAS_EM_LD,
     rotuloStatus, rotuloPapel, seloClassificacao, seloStatus, seloPrazo, situacaoPrazo,
     situacaoAlocacao, rotuloPrioridade, seloPrioridade, prioridadeEmDestaque,
+    rotuloOrigem, seloOrigem, rotuloPresencaEmLd,
     data, dataHora, iniciais,
     avisar, carregando, vazio, confirmar, avisoDaUrl, abrirModal, abrirPerfil,
     montarTopo, montarRodape, exigirSessao,
