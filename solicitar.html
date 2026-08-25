@@ -23,19 +23,7 @@
   <script defer src="flow_api.js"></script>
   <script defer src="flow_ui.js"></script>
   <script defer src="flow_docs.js"></script>
+  <script defer src="flow_solicitar_public.js"></script>
   <script defer src="flow_solicitar.js"></script>
-  <script>
-    (() => {
-      const removerAvisoTerceiro = () => {
-        document.querySelectorAll(".flow-aviso.ok").forEach((aviso) => {
-          const titulo = aviso.querySelector("strong");
-          if (titulo && titulo.textContent.trim() === "Pedido em nome de outra pessoa") aviso.remove();
-        });
-      };
-      const app = document.getElementById("app");
-      if (app) new MutationObserver(removerAvisoTerceiro).observe(app, { childList: true, subtree: true });
-      removerAvisoTerceiro();
-    })();
-  </script>
 </body>
 </html>
