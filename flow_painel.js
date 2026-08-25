@@ -30,6 +30,10 @@
   // É o primeiro clique que a pessoa espera em cada caso.
   const ORDENS_DA_LISTA = Object.freeze([
     { coluna: "protocol", ascendentePrimeiro: false },
+    // "urgente" > "normal" > "baixa" > "alta" em ordem alfabética não ajuda
+    // ninguém; por isso o primeiro clique traz o fim do alfabeto, onde "urgente"
+    // está. É a ordem que a operação quer: os urgentes primeiro.
+    { coluna: "priority", ascendentePrimeiro: false },
     { coluna: "type_label", ascendentePrimeiro: true },
     { coluna: "requester_name", ascendentePrimeiro: true },
     { coluna: "created_at", ascendentePrimeiro: false },
@@ -54,7 +58,7 @@
     tipos: [],
     tiposPorCodigo: new Map(),
     solicitacoes: [],
-    filtros: { busca: "", tipo: "", status: "", classificacao: "", indicador: "" },
+    filtros: { busca: "", tipo: "", status: "", classificacao: "", prioridade: "", indicador: "" },
     // Protocolo junto do id: a seleção atravessa páginas e a exportação de
     // "só selecionadas" precisa do protocolo de linhas que já saíram da tela.
     selecionadas: new Map(),
@@ -176,6 +180,7 @@
   // ---------------------------------------------------------------------------
   const INDICADORES = [
     { chave: "emAberto", rotulo: "Em aberto", classe: "", filtro: { abertas: true } },
+    { chave: "urgentesAbertas", rotulo: "Urgentes em aberto", classe: "alerta", filtro: { urgentes: true } },
     { chave: "hojeRecebidas", rotulo: "Recebidas hoje", classe: "", filtro: { hoje: true } },
     { chave: "execucao", rotulo: "Em execução", classe: "", filtro: { status: "em_execucao" } },
     { chave: "validacao", rotulo: "Aguardando validação", classe: "atencao", filtro: { status: "aguardando_validacao" } },
@@ -271,7 +276,10 @@
 
   function aplicarIndicador(indicador) {
     const jaAtivo = estado.filtros.indicador === indicador.chave;
-    estado.filtros = { busca: estado.filtros.busca, tipo: estado.filtros.tipo, status: "", classificacao: "", indicador: "" };
+    estado.filtros = {
+      busca: estado.filtros.busca, tipo: estado.filtros.tipo,
+      status: "", classificacao: "", prioridade: "", indicador: "",
+    };
     if (!jaAtivo) {
       estado.filtros.indicador = indicador.chave;
       Object.assign(estado.filtros, indicador.filtro);
@@ -294,6 +302,8 @@
     if (f.atrasadas) filtros.atrasadas = true;
     if (f.semResponsavel) filtros.semResponsavel = true;
     if (f.classificacao) filtros.classificacao = f.classificacao;
+    if (f.urgentes) filtros.urgentes = true;
+    if (f.prioridade) filtros.prioridade = f.prioridade;
     if (f.hoje) filtros.de = `${new Date().toISOString().slice(0, 10)}T00:00:00`;
     // A ordem entra aqui, e não só na listagem: `protocolos` tem teto, e qual
     // fatia cabe nele depende de como a lista está ordenada.
@@ -403,13 +413,26 @@
         atualizarBarraDeLote();
       });
 
-      const linha = elemento("tr", { class: estado.selecionadas.has(solicitacao.id) ? "selecionada" : "" }, [
+      const destaque = Ui.prioridadeEmDestaque(solicitacao.priority)
+        && !["concluido", "cancelado"].includes(solicitacao.status);
+      const classes = [
+        estado.selecionadas.has(solicitacao.id) ? "selecionada" : "",
+        // A faixa é o "vermelho" que o controle em papel pedia. Some quando o
+        // pedido fecha: urgência de coisa concluída não é fila de trabalho.
+        destaque ? `urgente-${texto(solicitacao.priority)}` : "",
+      ].filter(Boolean).join(" ");
+
+      const linha = elemento("tr", { class: classes }, [
         elemento("td", {}, [marcar]),
         elemento("td", {}, [
           elemento("button", {
             class: "protocolo", type: "button", text: solicitacao.protocol,
             onclick: () => abrirFicha(solicitacao.id),
           }),
+        ]),
+        elemento("td", {}, [
+          Ui.seloPrioridade(solicitacao.priority)
+            || elemento("span", { style: "color:var(--text-3)", text: "—" }),
         ]),
         elemento("td", { text: solicitacao.type_label }),
         elemento("td", {}, [
@@ -572,6 +595,8 @@
       ]));
     };
     dado("Status", null, seloStatus(data.status));
+    dado("Prioridade", null, Ui.seloPrioridade(data.priority)
+      || elemento("span", { text: Ui.rotuloPrioridade(data.priority || Ui.PRIORIDADE_PADRAO) }));
     dado("Prazo", null, seloPrazo(data.due_at, fechada));
     dado("Recebida em", dataHora(data.created_at));
     dado("Solicitante", [data.requester_name, data.requester_area].filter(Boolean).join(" · "));
@@ -670,6 +695,13 @@
     const responsavel = elemento("input", { id: "acao-responsavel", type: "text", autocomplete: "off", placeholder: "Nome de quem executa" });
     responsavel.value = texto(solicitacao.owner_name);
 
+    const prioridade = elemento("select", { id: "acao-prioridade" });
+    Object.entries(Ui.PRIORIDADES).forEach(([valor, info]) => {
+      const node = elemento("option", { value: valor, text: info.rotulo });
+      if (valor === (texto(solicitacao.priority) || Ui.PRIORIDADE_PADRAO)) node.selected = true;
+      prioridade.append(node);
+    });
+
     const prazo = elemento("input", { id: "acao-prazo", type: "date" });
     prazo.value = texto(solicitacao.due_at);
 
@@ -684,6 +716,7 @@
     const salvar = async () => {
       const alteracoes = [
         ["status", status.value, solicitacao.status],
+        ["priority", prioridade.value, texto(solicitacao.priority) || Ui.PRIORIDADE_PADRAO],
         ["owner_name", responsavel.value, solicitacao.owner_name],
         ["due_at", prazo.value, solicitacao.due_at || ""],
         ["answer", resposta.value, solicitacao.answer],
@@ -767,6 +800,11 @@
       ]),
       elemento("div", { class: "flow-grid" }, [
         elemento("label", { class: "flow-campo", for: "acao-status" }, [elemento("span", { text: "Status" }), status]),
+        elemento("label", { class: "flow-campo", for: "acao-prioridade" }, [
+          elemento("span", { text: "Prioridade" }),
+          elemento("small", { text: "Urgente e alta destacam a linha no painel e entram no cartão de urgentes." }),
+          prioridade,
+        ]),
         elemento("label", { class: "flow-campo", for: "acao-responsavel" }, [elemento("span", { text: "Responsável" }), responsavel]),
         elemento("label", { class: "flow-campo", for: "acao-prazo" }, [elemento("span", { text: "Prazo" }), prazo]),
         elemento("label", { class: "flow-campo larga", for: "acao-resposta" }, [
@@ -1244,14 +1282,29 @@
       carregarSolicitacoes();
     });
 
+    const prioridade = elemento("select", { id: "filtro-prioridade" });
+    prioridade.append(elemento("option", { value: "", text: "Qualquer prioridade" }));
+    Object.entries(Ui.PRIORIDADES).forEach(([valor, info]) => {
+      const node = elemento("option", { value: valor, text: info.rotulo });
+      if (valor === estado.filtros.prioridade) node.selected = true;
+      prioridade.append(node);
+    });
+    prioridade.addEventListener("change", () => {
+      estado.filtros.prioridade = prioridade.value;
+      estado.filtros.urgentes = false;
+      estado.filtros.indicador = "";
+      carregarSolicitacoes();
+    });
+
     return elemento("div", { class: "flow-filtros" }, [
       elemento("label", { class: "flow-campo busca", for: "filtro-busca" }, [elemento("span", { text: "Buscar" }), busca]),
       elemento("label", { class: "flow-campo", for: "filtro-tipo" }, [elemento("span", { text: "Tipo" }), tipo]),
       elemento("label", { class: "flow-campo", for: "filtro-status" }, [elemento("span", { text: "Status" }), status]),
+      elemento("label", { class: "flow-campo", for: "filtro-prioridade" }, [elemento("span", { text: "Prioridade" }), prioridade]),
       elemento("button", {
         class: "text-button", type: "button", text: "Limpar filtros",
         onclick: () => {
-          estado.filtros = { busca: "", tipo: "", status: "", classificacao: "", indicador: "" };
+          estado.filtros = { busca: "", tipo: "", status: "", classificacao: "", prioridade: "", indicador: "" };
           renderAba();
           carregarSolicitacoes();
           montarIndicadores(document.getElementById("painel-indicadores"));

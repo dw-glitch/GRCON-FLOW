@@ -47,6 +47,10 @@ total do recorte e a posição sempre à vista. Todo filtro — inclusive "atras
 sobre as linhas já carregadas: numa página de 50, peneirar depois responderia
 sobre as 50 primeiras em vez de sobre a base inteira.
 
+Há filtro por prioridade e um cartão de urgentes em aberto, e a coluna
+**Prioridade** fica logo depois do protocolo, porque é o que mais muda a ordem de
+leitura da linha.
+
 Clicar no cabeçalho ordena, também no banco, e volta para a primeira página. O
 mesmo clique repetido inverte o sentido; trocar de coluna começa pelo sentido
 natural daquele dado — data pela mais recente, texto em A–Z. **Progresso** não
@@ -76,6 +80,14 @@ formulário.
 ALOCAÇÃO IDENTIFICADA". Documento fora das bases vira "NÃO LOCALIZADO NAS LDS
 ATIVAS". Um título nunca vira código sozinho: o Flow oferece candidatos e o
 operador confirma.
+
+**Urgência é ato explícito, e escasso.** O solicitante pode marcar o pedido como
+urgente no formulário, e a equipe pode subir ou baixar a prioridade na ficha. A
+marcação entra no histórico com autor e horário — não é parâmetro silencioso do
+registro —, destaca a linha no painel com faixa e selo, alimenta o cartão
+"Urgentes em aberto" e sai por extenso na planilha. **Normal não ganha selo**: se
+toda linha se destaca, nenhuma se destaca. Urgência de pedido concluído deixa de
+aparecer, porque não é mais fila de trabalho.
 
 **Divergência vai para validação.** Quando as LDs vigentes discordam sobre
 revisão, título ou alocação do mesmo documento, nenhuma ocorrência é eleita —
