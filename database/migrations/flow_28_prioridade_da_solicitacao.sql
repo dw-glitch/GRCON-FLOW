@@ -37,3 +37,81 @@ alter table public.flow_requests
 create index if not exists flow_requests_prioridade_aberta_idx
   on public.flow_requests (priority, created_at desc)
   where status not in ('concluido', 'cancelado');
+
+-- ---------------------------------------------------------------------------
+-- Quem registra o pedido pode marcá-lo como urgente.
+--
+-- `flow_update_request` é, e continua sendo, only-equipe: ela abre sete campos
+-- de uma vez (status, responsável, prazo, resposta…) e nada disso é do
+-- solicitante. Mas o papel padrão de todo cadastro novo é 'solicitante', então
+-- pela função antiga a caixa "Esta solicitação é urgente" do formulário só
+-- funcionaria para as três pessoas que hoje são administradoras — para
+-- qualquer outra ela devolveria "Somente a equipe pode alterar solicitações."
+-- e a urgência se perderia calada.
+--
+-- Esta função abre exatamente uma coisa, e só para quem tem direito a ela:
+-- a prioridade do próprio pedido, por quem acabou de registrá-lo. Não é um
+-- atalho para o resto — o painel continua passando por flow_update_request.
+-- ---------------------------------------------------------------------------
+create or replace function public.flow_set_request_priority(
+  p_request_id uuid,
+  p_priority text,
+  p_note text default ''::text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  atual record;
+begin
+  if auth.uid() is null then
+    raise exception 'É preciso estar autenticado para alterar a prioridade.';
+  end if;
+
+  if p_priority not in ('baixa', 'normal', 'alta', 'urgente') then
+    raise exception 'Prioridade desconhecida: %', p_priority;
+  end if;
+
+  select * into atual from public.flow_requests where id = p_request_id for update;
+  if not found then
+    raise exception 'Solicitação não encontrada.';
+  end if;
+
+  -- A equipe pode sempre. Fora dela, só o dono do pedido, e só enquanto ele
+  -- ainda está aberto: depois de concluído ou cancelado, mexer na prioridade
+  -- não muda mais nada no atendimento e só embaralharia o histórico.
+  if not public.flow_is_staff() then
+    if coalesce(atual.submitted_by_id, atual.requester_id) is distinct from auth.uid() then
+      raise exception 'Só a equipe ou quem registrou o pedido pode alterar a prioridade dele.';
+    end if;
+    if atual.status in ('concluido', 'cancelado') then
+      raise exception 'Esta solicitação já foi encerrada.';
+    end if;
+  end if;
+
+  if coalesce(atual.priority, '') = p_priority then
+    return;
+  end if;
+
+  update public.flow_requests
+     set priority = p_priority, updated_at = now()
+   where id = p_request_id;
+
+  -- Mesma forma que flow_update_request grava: 'solicitacao_alterada' com
+  -- field/old/new. Assim a linha do tempo desenha a marcação do solicitante
+  -- exatamente como desenha uma troca de prioridade feita pelo painel, e o
+  -- nome de quem pediu urgência aparece junto.
+  insert into public.flow_history (
+    request_id, protocol, action, field, old_value, new_value, note, actor_id, actor_name
+  ) values (
+    p_request_id, atual.protocol, 'solicitacao_alterada', 'priority',
+    coalesce(nullif(atual.priority, ''), 'normal'), p_priority,
+    coalesce(p_note, ''), auth.uid(), public.flow_current_name()
+  );
+end;
+$$;
+
+revoke all on function public.flow_set_request_priority(uuid, text, text) from public;
+grant execute on function public.flow_set_request_priority(uuid, text, text) to authenticated;

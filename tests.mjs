@@ -943,6 +943,42 @@ check("a triagem roda mesmo quando o tipo não consulta LD", () => {
 
 // ── Urgência ───────────────────────────────────────────────────────────────
 
+check("o solicitante consegue marcar o próprio pedido como urgente", () => {
+  // flow_update_request recusa quem não é da equipe, e o papel padrão de todo
+  // cadastro novo é 'solicitante'. Marcar urgência por ela deixaria a caixa do
+  // formulário funcionando só para administradores — o resto perderia a
+  // urgência calada. Daí um RPC que abre exatamente um campo, e só para o dono.
+  const solicitar = fs.readFileSync(path.join(root, "flow_solicitar.js"), "utf8");
+  assert.doesNotMatch(
+    solicitar, /Api\.solicitacoes\.atualizar\(/,
+    "a tela pública não pode passar por flow_update_request, que é da equipe"
+  );
+
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /flow_set_request_priority/);
+
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_28_prioridade_da_solicitacao.sql"), "utf8"
+  );
+  assert.match(migracao, /create or replace function public\.flow_set_request_priority/);
+  assert.match(migracao, /p_priority not in \('baixa', 'normal', 'alta', 'urgente'\)/,
+    "o RPC precisa validar o valor, e não confiar só na restrição da coluna");
+  assert.match(migracao, /submitted_by_id, atual\.requester_id\) is distinct from auth\.uid\(\)/,
+    "fora da equipe, só o dono do pedido");
+  assert.match(migracao, /grant execute on function public\.flow_set_request_priority/);
+});
+
+check("a tela pública não mostra detalhe técnico ao solicitante", () => {
+  // flow_solicitar_public.js existe para manter erro de SQL/RLS fora dos olhos
+  // de quem só quer registrar um pedido. Um aviso novo não pode furar isso.
+  const solicitar = fs.readFileSync(path.join(root, "flow_solicitar.js"), "utf8");
+  const vazamentos = solicitar.match(/avisar\(`[^`]*\$\{[^}]*\.error[^}]*\}[^`]*`/g) || [];
+  assert.deepEqual(
+    vazamentos, [],
+    `mensagem de erro cru na tela do solicitante: ${vazamentos.join(" | ")}`
+  );
+});
+
 check("normal não ganha selo; alta e urgente sim", () => {
   // Se toda linha carrega um selo, nenhuma chama atenção. O que se destaca é o
   // que sai do normal — é isso que impede "urgente" de virar decoração.
@@ -977,7 +1013,7 @@ check("a urgência é gravada como ato explícito, com autor e horário", () => 
   // Passar prioridade como parâmetro do registro esconderia quem pediu
   // prioridade. Como alteração, ela nasce no histórico.
   const solicitar = fs.readFileSync(path.join(root, "flow_solicitar.js"), "utf8");
-  assert.match(solicitar, /Api\.solicitacoes\.atualizar\(\s*\n?\s*data\.id, "priority", "urgente"/);
+  assert.match(solicitar, /Api\.solicitacoes\.definirPrioridade\(\s*\n?\s*data\.id, "urgente"/);
   assert.match(solicitar, /Marcada como urgente pelo solicitante no registro/);
   assert.match(solicitar, /id: "sol-urgente"/);
 

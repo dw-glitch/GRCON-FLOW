@@ -496,6 +496,9 @@
   .flow-toast.visivel { opacity: 1; transform: translateX(-50%) translateY(0); }
   .flow-toast.erro { background: #97382e; }
   .flow-toast.ok { background: var(--success-700); }
+  /* Nem tudo que precisa de atenção é erro: o pedido entrou, só falta um
+     detalhe. Vermelho aqui faria a pessoa achar que perdeu o protocolo. */
+  .flow-toast.atencao { background: #b58225; }
 
   /* ── Carregando ────────────────────────────────────────────────────────── */
   .flow-carregando { display: flex; align-items: center; gap: .5rem; color: var(--text-3); font-size: .82rem; padding: 1.5rem; justify-content: center; }

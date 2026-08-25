@@ -886,10 +886,19 @@
     // consegue ver quem pediu prioridade — que é a única coisa que impede
     // "urgente" de virar o padrão silencioso de todo mundo.
     if (estado.urgente) {
-      const marcada = await Api.solicitacoes.atualizar(
-        data.id, "priority", "urgente", "Marcada como urgente pelo solicitante no registro"
+      const marcada = await Api.solicitacoes.definirPrioridade(
+        data.id, "urgente", "Marcada como urgente pelo solicitante no registro"
       );
-      if (marcada.error) avisar(`Solicitação registrada, mas não foi possível marcá-la como urgente: ${marcada.error}`, "erro");
+      // O protocolo já existe; a urgência é o acréscimo. Por isso o aviso fala
+      // do que a pessoa precisa fazer a seguir — e não do motivo técnico, que
+      // vai para o console, como o resto desta tela já faz.
+      if (marcada.error) {
+        console.error("[GRCON Flow · detalhe técnico de prioridade]", marcada.error);
+        avisar(
+          "Solicitação registrada. A marcação de urgente não foi gravada — avise a equipe pelo protocolo acima.",
+          "atencao"
+        );
+      }
     }
 
     // Primeiro sobe os arquivos. Para LI/MC, o PDF e o Excel são vinculados ao

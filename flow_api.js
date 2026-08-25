@@ -488,6 +488,23 @@
     },
 
     /**
+     * Prioridade tem caminho próprio porque tem dono próprio. `flow_update_request`
+     * é da equipe: ela abre status, responsável, prazo e resposta de uma vez, e
+     * nada disso é do solicitante. Já a urgência do próprio pedido é dele — o RPC
+     * abaixo aceita a equipe em qualquer solicitação e o solicitante apenas na
+     * que ele mesmo registrou, enquanto ela ainda estiver aberta.
+     * O painel continua usando `atualizar`.
+     */
+    async definirPrioridade(id, prioridade, nota) {
+      return chamar(
+        client.rpc("flow_set_request_priority", {
+          p_request_id: id, p_priority: texto(prioridade), p_note: texto(nota),
+        }),
+        "definir prioridade"
+      );
+    },
+
+    /**
      * Exclusão administrativa e permanente. Os objetos privados saem pelo
      * Storage API antes da linha principal, evitando arquivos órfãos no bucket.
      * O RPC repete a autorização no banco; esconder o botão não é a proteção.
