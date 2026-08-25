@@ -85,6 +85,39 @@
     cancelado: "Cancelado",
   };
 
+  /**
+   * Urgência. "Normal" não ganha selo de propósito: se toda linha carrega um
+   * selo, nenhuma chama atenção, e urgente vira decoração. O que se destaca é o
+   * que sai do normal.
+   */
+  const PRIORIDADES = Object.freeze({
+    baixa:   Object.freeze({ rotulo: "Baixa",   classe: "prioridade-baixa",   destaque: false }),
+    normal:  Object.freeze({ rotulo: "Normal",  classe: "",                   destaque: false }),
+    alta:    Object.freeze({ rotulo: "Alta",    classe: "prioridade-alta",    destaque: true }),
+    urgente: Object.freeze({ rotulo: "Urgente", classe: "prioridade-urgente", destaque: true }),
+  });
+
+  const PRIORIDADE_PADRAO = "normal";
+
+  function rotuloPrioridade(valor) {
+    const info = PRIORIDADES[texto(valor)];
+    return info ? info.rotulo : texto(valor) || "—";
+  }
+
+  /** Verdadeiro só para o que precisa saltar aos olhos: alta e urgente. */
+  function prioridadeEmDestaque(valor) {
+    const info = PRIORIDADES[texto(valor)];
+    return Boolean(info && info.destaque);
+  }
+
+  /** Devolve null quando a prioridade é a normal — nada a mostrar. */
+  function seloPrioridade(valor) {
+    const chave = texto(valor);
+    const info = PRIORIDADES[chave];
+    if (!info || chave === PRIORIDADE_PADRAO || !info.classe) return null;
+    return elemento("span", { class: `flow-selo ${info.classe}`, text: info.rotulo });
+  }
+
   const PAPEIS = {
     solicitante: "Solicitante",
     operador: "Operador",
@@ -567,9 +600,9 @@
 
   root.FlowUi = Object.freeze({
     $, $$, elemento, esc, texto,
-    CLASSIFICACOES, STATUS, PAPEIS,
+    CLASSIFICACOES, STATUS, PAPEIS, PRIORIDADES, PRIORIDADE_PADRAO,
     rotuloStatus, rotuloPapel, seloClassificacao, seloStatus, seloPrazo, situacaoPrazo,
-    situacaoAlocacao,
+    situacaoAlocacao, rotuloPrioridade, seloPrioridade, prioridadeEmDestaque,
     data, dataHora, iniciais,
     avisar, carregando, vazio, confirmar, avisoDaUrl, abrirModal, abrirPerfil,
     montarTopo, montarRodape, exigirSessao,

@@ -339,6 +339,7 @@
     requester_name: "requester_name",
     created_at: "created_at",
     owner_name: "owner_name",
+    priority: "priority",
     status: "status",
     due_at: "due_at",
   });
@@ -381,6 +382,13 @@
       consulta = consulta.not("status", "in", "(concluido,cancelado)").eq("owner_name", "");
     }
     if (filtros.classificacao) consulta = consulta.eq("filtro_itens.classification", filtros.classificacao);
+    // "urgentes" é o recorte que a equipe abre pelo cartão do indicador: só o
+    // que está em aberto, porque urgência de pedido concluído não é fila.
+    if (filtros.urgentes) {
+      consulta = consulta.not("status", "in", "(concluido,cancelado)").in("priority", ["alta", "urgente"]);
+    } else if (filtros.prioridade) {
+      consulta = consulta.eq("priority", filtros.prioridade);
+    }
     if (filtros.busca) {
       const termo = texto(filtros.busca).replace(/[%,()]/g, " ");
       consulta = consulta.or(
@@ -538,9 +546,10 @@
         return count || 0;
       };
       const abertas = (q) => q.not("status", "in", "(concluido,cancelado)");
+      const urgentes = (q) => abertas(q).in("priority", ["alta", "urgente"]);
       const [
         emAberto, hojeRecebidas, execucao, validacao, atrasadas, concluidas, semResponsavel,
-        naoLocalizados, pendenteId, semAlocacao,
+        naoLocalizados, pendenteId, semAlocacao, urgentesAbertas,
       ] = await Promise.all([
         contar(abertas),
         contar((q) => q.gte("created_at", `${hoje}T00:00:00`)),
@@ -552,10 +561,11 @@
         contarItens((q) => q.eq("classification", "NAO_LOCALIZADO")),
         contarItens((q) => q.eq("classification", "IDENTIFICACAO_PENDENTE")),
         contarItens((q) => q.eq("classification", "ACAO_NECESSARIA")),
+        contar(urgentes),
       ]);
       return {
         emAberto, hojeRecebidas, execucao, validacao, atrasadas, concluidas,
-        semResponsavel, naoLocalizados, pendenteId, semAlocacao,
+        semResponsavel, naoLocalizados, pendenteId, semAlocacao, urgentesAbertas,
       };
     },
   };

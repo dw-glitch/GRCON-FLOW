@@ -31,6 +31,7 @@
     anexos: [],
     paresN1710: {},
     formulario: {},
+    urgente: false,
     enviando: false,
   };
 
@@ -86,6 +87,7 @@
           // resposta de um campo que não existe mais só geraria confusão.
           estado.tipo = tipo;
           estado.formulario = {};
+          estado.urgente = false;
           estado.documentos = [];
           estado.anexos = [];
           estado.paresN1710 = {};
@@ -562,6 +564,14 @@
     blocos.push(montarAnexos());
 
     // Observações. Sempre presente: é onde cabe o que o formulário não previu.
+    const marcaUrgente = elemento("input", { id: "sol-urgente", type: "checkbox" });
+    marcaUrgente.checked = estado.urgente;
+    marcaUrgente.addEventListener("change", () => {
+      estado.urgente = marcaUrgente.checked;
+      const motivo = document.getElementById("sol-urgente-motivo");
+      if (motivo) motivo.hidden = !estado.urgente;
+    });
+
     blocos.push(elemento("section", { class: "flow-card" }, [
       elemento("div", { class: "flow-card-head" }, [
         elemento("h3", { text: "Observações" }),
@@ -569,6 +579,18 @@
       campoTexto("sol-observacao", "Observações", {
         valor: estado.formulario._observacao || "", tipo: "textarea",
         placeholder: "Prioridade para emissão desta semana…",
+      }),
+      elemento("label", { class: "flow-urgente", for: "sol-urgente" }, [
+        marcaUrgente,
+        elemento("span", {}, [
+          elemento("b", { text: "Esta solicitação é urgente" }),
+          elemento("small", { text: "A linha fica destacada no painel e entra no cartão de urgentes da equipe." }),
+        ]),
+      ]),
+      elemento("p", {
+        id: "sol-urgente-motivo", class: "flow-aviso atencao", hidden: !estado.urgente,
+        style: "margin:.6rem 0 0",
+        text: "Escreva nas observações por que este pedido não pode esperar. Urgência sem motivo escrito é o que faz todo pedido virar urgente e nenhum ser tratado como tal.",
       }),
     ]));
 
@@ -609,6 +631,8 @@
     estado.formulario._area = pegar("sol-area");
     estado.formulario._contato = pegar("sol-contato");
     estado.formulario._observacao = pegar("sol-observacao");
+    const marca = document.getElementById("sol-urgente");
+    if (marca) estado.urgente = marca.checked;
     (estado.tipo.campos || []).forEach((campo) => {
       const node = document.querySelector(`[data-campo="${campo.field_key}"]`);
       if (node) estado.formulario[campo.field_key] = valorDoCampo(node);
@@ -663,6 +687,7 @@
     linha("Contato", estado.formulario._contato);
     (tipo.campos || []).forEach((campo) => linha(campo.label, estado.formulario[campo.field_key]));
     linha("Observações", estado.formulario._observacao);
+    if (estado.urgente) linha("Prioridade", "Urgente");
 
     const itens = elemento("div", { class: "flow-itens" });
     if (estado.documentos.length) {
@@ -856,6 +881,17 @@
       return;
     }
 
+    // A urgência é gravada como uma alteração explícita, e não como parâmetro
+    // do registro: assim ela nasce no histórico com autor e horário, e a equipe
+    // consegue ver quem pediu prioridade — que é a única coisa que impede
+    // "urgente" de virar o padrão silencioso de todo mundo.
+    if (estado.urgente) {
+      const marcada = await Api.solicitacoes.atualizar(
+        data.id, "priority", "urgente", "Marcada como urgente pelo solicitante no registro"
+      );
+      if (marcada.error) avisar(`Solicitação registrada, mas não foi possível marcá-la como urgente: ${marcada.error}`, "erro");
+    }
+
     // Primeiro sobe os arquivos. Para LI/MC, o PDF e o Excel são vinculados ao
     // item correto e só então a triagem define a próxima ação da equipe.
     const arquivos = prepararAnexosParaEnvio(data);
@@ -903,7 +939,8 @@
             class: "secondary-button", type: "button", text: "Fazer outra solicitação",
             onclick: () => {
               estado.tipo = null; estado.etapa = 1;
-              estado.documentos = []; estado.anexos = []; estado.paresN1710 = {}; estado.formulario = {};
+              estado.documentos = []; estado.anexos = []; estado.paresN1710 = {};
+              estado.formulario = {}; estado.urgente = false;
               render();
             },
           }),

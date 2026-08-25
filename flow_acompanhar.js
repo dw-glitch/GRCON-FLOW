@@ -63,6 +63,7 @@
           solicitacao.summary ? elemento("span", { style: "font-size:.84rem;color:var(--text-3)", text: solicitacao.summary }) : null,
         ]),
         elemento("div", { style: "display:flex;gap:.4rem;flex-wrap:wrap;align-items:center" }, [
+          root.FlowUi.seloPrioridade(solicitacao.priority),
           seloStatus(solicitacao.status),
           seloPrazo(solicitacao.due_at, fechada),
         ]),
@@ -132,6 +133,7 @@
         elemento("p", { text: data.type_label }),
       ]),
       elemento("div", { style: "display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem" }, [
+        root.FlowUi.seloPrioridade(data.priority),
         seloStatus(data.status),
         seloPrazo(data.due_at, ["concluido", "cancelado"].includes(data.status)),
       ]),

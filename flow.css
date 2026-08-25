@@ -327,6 +327,34 @@
   .flow-tabela .protocolo { font-family: var(--font-mono); font-size: .76rem; color: var(--brand-800); font-weight: 700; white-space: nowrap; }
   .flow-tabela button.protocolo { background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; }
 
+  /* ── Urgência ──────────────────────────────────────────────────────────
+     A cor sozinha não pode carregar a informação: quem não distingue vermelho
+     lê o texto do selo, e a faixa é reforço, não o recado. */
+  .flow-selo.prioridade-urgente {
+    background: var(--danger-100); color: var(--danger-700);
+    font-weight: 800; letter-spacing: .02em;
+  }
+  .flow-selo.prioridade-alta { background: var(--warning-100); color: var(--warning-800); }
+  .flow-selo.prioridade-baixa { background: var(--surface-3); color: var(--text-3); }
+
+  .flow-tabela tr.urgente-urgente td:first-child { box-shadow: inset 3px 0 0 var(--danger-700); }
+  .flow-tabela tr.urgente-alta td:first-child { box-shadow: inset 3px 0 0 var(--warning-800); }
+  .flow-tabela tr.urgente-urgente td { background: color-mix(in srgb, var(--danger-100) 40%, transparent); }
+  .flow-tabela tr.urgente-urgente.selecionada td,
+  .flow-tabela tr.urgente-alta.selecionada td { background: var(--brand-100); }
+
+  .flow-urgente {
+    display: flex; align-items: flex-start; gap: .6rem; cursor: pointer;
+    margin-top: .9rem; padding: .75rem .85rem;
+    border: 1px solid var(--border-1); border-radius: var(--radius-sm);
+    background: var(--surface-2);
+  }
+  .flow-urgente:hover { border-color: var(--brand-600); }
+  .flow-urgente input { width: 1.05rem; height: 1.05rem; margin-top: .15rem; flex: 0 0 auto; }
+  .flow-urgente b { display: block; font-size: .88rem; }
+  .flow-urgente small { display: block; font-size: .78rem; color: var(--text-3); }
+  .flow-urgente:has(input:checked) { border-color: var(--danger-700); background: var(--danger-100); }
+
   /* ── Indicadores ───────────────────────────────────────────────────────── */
   .flow-indicadores { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); margin-bottom: var(--space-5); }
   .flow-indicador {

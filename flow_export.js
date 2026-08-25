@@ -56,10 +56,15 @@
     POSTAR_SIGEM: "Postar no SIGEM", CONCLUIDO: "Concluído",
   });
 
-  // Mesmos oito títulos exibidos na tabela do painel. Esta lista é exportada
+  // Os mesmos títulos exibidos na tabela do painel. Esta lista é exportada
   // também para os testes, impedindo que tela e planilha se afastem em silêncio.
+  //
+  // A prioridade vem logo depois do protocolo porque é o que mais muda a ordem
+  // de leitura da linha. Na planilha ela precisa ser coluna: a faixa vermelha
+  // que o painel desenha não sobrevive a um arquivo do Excel.
   const COLUNAS_PAINEL = Object.freeze([
     { header: "PROTOCOLO", key: "protocol", width: 21 },
+    { header: "PRIORIDADE", key: "priority", width: 14 },
     { header: "TIPO", key: "type", width: 31 },
     { header: "SOLICITANTE", key: "requester", width: 28 },
     { header: "RECEBIDA", key: "received", width: 15 },
@@ -72,6 +77,11 @@
   // A ficha usa colunas próprias por tipo. A aba de itens reúne o catálogo
   // completo para que nenhum dado desapareça quando há tipos diferentes no
   // mesmo arquivo.
+  // "normal" some da planilha; o resto aparece por extenso.
+  const PRIORIDADE_LEGIVEL = Object.freeze({
+    baixa: "Baixa", normal: "", alta: "Alta", urgente: "URGENTE",
+  });
+
   const COLUNAS_ITENS = Object.freeze([
     { header: "PROTOCOLO", key: "protocol", width: 21, value: (r) => texto(r.protocol) },
     { header: "ITEM", key: "item_number", width: 9, value: (r) => Number(r.item_number) || "" },
@@ -128,8 +138,13 @@
       let linha = porProtocolo.get(protocolo);
       if (!linha) {
         const fechada = ["concluido", "cancelado"].includes(registro.request_status);
+        const prioridadeCodigo = texto(registro.priority) || "normal";
         linha = {
           protocol: protocolo,
+          priorityCode: prioridadeCodigo,
+          // Normal fica em branco de propósito: uma coluna repetindo "Normal"
+          // em 90% das linhas esconde as poucas que importam.
+          priority: PRIORIDADE_LEGIVEL[prioridadeCodigo] || "",
           type: texto(registro.type_label),
           requester: [texto(registro.requester_name), texto(registro.requester_area)].filter(Boolean).join("\n"),
           received: dataBR(registro.received_at),
@@ -283,6 +298,12 @@
         celula.border = { bottom: { style: "hair", color: { argb: BORDA } } };
         if (indice % 2) celula.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
         if (coluna.key === "status") estiloStatus(celula, registro.statusCode);
+        if (coluna.key === "priority" && registro.priority) {
+          const urgente = registro.priorityCode === "urgente";
+          celula.font = { name: "Aptos", size: 9, bold: true, color: { argb: urgente ? "FFA33B36" : "FF8A5C08" } };
+          celula.fill = { type: "pattern", pattern: "solid", fgColor: { argb: urgente ? "FFFDE9E7" : "FFFFF3CF" } };
+          celula.alignment = { vertical: "middle", horizontal: "center" };
+        }
         if (coluna.key === "protocol") celula.font = { name: "Aptos", size: 9, bold: true, color: { argb: AZUL_CLARO } };
         if (coluna.key === "due" && registro.due.includes("atrasado")) {
           celula.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFDE9E7" } };

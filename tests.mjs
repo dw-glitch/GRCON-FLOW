@@ -192,7 +192,7 @@ check("a exportação reproduz as 26 colunas do Controle de Solicitações", () 
 check("a primeira aba do Excel tem as mesmas colunas visíveis no painel", () => {
   const headers = Export.COLUNAS_PAINEL.map((coluna) => coluna.header);
   assert.deepEqual(headers, [
-    "PROTOCOLO", "TIPO", "SOLICITANTE", "RECEBIDA",
+    "PROTOCOLO", "PRIORIDADE", "TIPO", "SOLICITANTE", "RECEBIDA",
     "RESPONSÁVEL", "PROGRESSO", "STATUS", "PRAZO",
   ]);
   const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
@@ -939,6 +939,88 @@ check("a triagem roda mesmo quando o tipo não consulta LD", () => {
   // finalmente chega lá.
   const ui = fs.readFileSync(path.join(root, "flow_ui.js"), "utf8");
   assert.match(ui, /TRIAGEM_NAO_APLICAVEL: Object\.freeze\(\{ rotulo: "Triagem não aplicável"/);
+});
+
+// ── Urgência ───────────────────────────────────────────────────────────────
+
+check("normal não ganha selo; alta e urgente sim", () => {
+  // Se toda linha carrega um selo, nenhuma chama atenção. O que se destaca é o
+  // que sai do normal — é isso que impede "urgente" de virar decoração.
+  const Ui = janela.FlowUi;
+  assert.equal(Ui.seloPrioridade("normal"), null);
+  assert.equal(Ui.seloPrioridade(""), null);
+  assert.equal(Ui.seloPrioridade(undefined), null);
+  assert.ok(Ui.seloPrioridade("urgente"), "urgente precisa de selo");
+  assert.ok(Ui.seloPrioridade("alta"), "alta precisa de selo");
+  assert.equal(Ui.prioridadeEmDestaque("urgente"), true);
+  assert.equal(Ui.prioridadeEmDestaque("alta"), true);
+  assert.equal(Ui.prioridadeEmDestaque("normal"), false);
+  assert.equal(Ui.prioridadeEmDestaque("baixa"), false);
+  assert.equal(Ui.rotuloPrioridade("urgente"), "Urgente");
+});
+
+check("o vocabulário da tela é o mesmo que o banco aceita", () => {
+  // Quatro valores, nem um a mais: a coluna passou a ter restrição, então um
+  // rótulo inventado na tela viraria erro de gravação na cara do usuário.
+  const Ui = janela.FlowUi;
+  assert.deepEqual(Object.keys(Ui.PRIORIDADES), ["baixa", "normal", "alta", "urgente"]);
+  assert.equal(Ui.PRIORIDADE_PADRAO, "normal");
+
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_28_prioridade_da_solicitacao.sql"), "utf8");
+  assert.match(migracao, /check \(priority in \('baixa', 'normal', 'alta', 'urgente'\)\)/);
+  assert.match(migracao, /update public\.flow_requests[\s\S]*?set priority = 'normal'/,
+    "valor fora da lista precisa ser normalizado antes da restrição entrar");
+});
+
+check("a urgência é gravada como ato explícito, com autor e horário", () => {
+  // Passar prioridade como parâmetro do registro esconderia quem pediu
+  // prioridade. Como alteração, ela nasce no histórico.
+  const solicitar = fs.readFileSync(path.join(root, "flow_solicitar.js"), "utf8");
+  assert.match(solicitar, /Api\.solicitacoes\.atualizar\(\s*\n?\s*data\.id, "priority", "urgente"/);
+  assert.match(solicitar, /Marcada como urgente pelo solicitante no registro/);
+  assert.match(solicitar, /id: "sol-urgente"/);
+
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /\["priority", prioridade\.value/,
+    "a ficha precisa salvar a prioridade junto das demais alterações");
+});
+
+check("o painel destaca, filtra, conta e ordena por urgência", () => {
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /chave: "urgentesAbertas"/, "o cartão de indicador precisa existir");
+  assert.match(painel, /id: "filtro-prioridade"/);
+  assert.match(painel, /\{ coluna: "priority", ascendentePrimeiro: false \}/,
+    "o primeiro clique deve trazer os urgentes, não a ordem alfabética");
+  assert.match(painel, /destaque \? `urgente-\$\{texto\(solicitacao\.priority\)\}` : ""/);
+  assert.match(painel, /!\["concluido", "cancelado"\]\.includes\(solicitacao\.status\)/,
+    "urgência de pedido fechado não é fila de trabalho");
+
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /if \(filtros\.urgentes\)/);
+  assert.match(api, /\.in\("priority", \["alta", "urgente"\]\)/);
+  assert.match(api, /priority: "priority"/, "prioridade precisa ser coluna ordenável no servidor");
+});
+
+check("a cor não é o único recado da urgência", () => {
+  // Quem não distingue vermelho precisa ler a palavra. A faixa reforça; o selo
+  // e a coluna informam.
+  const css = fs.readFileSync(path.join(root, "flow.css"), "utf8");
+  assert.match(css, /\.flow-selo\.prioridade-urgente/);
+  assert.match(css, /tr\.urgente-urgente td:first-child/);
+  const exportacao = fs.readFileSync(path.join(root, "flow_export.js"), "utf8");
+  assert.match(exportacao, /urgente: "URGENTE"/, "a planilha precisa dizer por extenso");
+  assert.match(exportacao, /normal: ""/, "e deixar o normal em branco");
+});
+
+check("o Controle Oficial continua com as mesmas 26 colunas", () => {
+  // A prioridade entra na Visão do Painel, nunca na aba que é colada sob a
+  // planilha oficial do cliente.
+  const colunas = Report.CONTROL_COLUMNS || Report.controlColumns;
+  const cabecalhos = (colunas || []).map((c) => (typeof c === "string" ? c : c.header));
+  assert.equal(cabecalhos.length, 26, "a planilha oficial tem 26 colunas");
+  assert.ok(!cabecalhos.some((c) => /PRIORIDADE/i.test(String(c))),
+    "prioridade não pode aparecer no Controle Oficial");
 });
 
 console.log(JSON.stringify({ app: "GRCON Flow", passou: true, testes: checks.length, nomes: checks }, null, 2));
