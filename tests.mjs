@@ -28,6 +28,9 @@ janela.document = { createElement: () => ({ style: {} }) };
 
 await import(`file://${path.join(root, "flow_docs.js")}`);
 await import(`file://${path.join(root, "flow_export.js")}`);
+// flow_ui.js só toca no DOM dentro das funções; carregá-lo aqui permite
+// exercitar o vocabulário compartilhado em vez de conferi-lo por regex.
+await import(`file://${path.join(root, "flow_ui.js")}`);
 
 const Docs = janela.FlowDocs;
 const Export = janela.FlowExport;
@@ -864,6 +867,78 @@ check("não há patch de runtime remendando a API e o DOM depois de carregados",
   assert.match(ui, /rotulo: "JÁ EXISTE · alocado"/, "o vocabulário do painel é do módulo");
   const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
   assert.match(api, /triadasNoServidor/, "a triagem já feita no banco não se repete pela tela");
+});
+
+// ── Alocação: a LD tem três respostas, não duas ────────────────────────────
+
+check("alocação confirmada sem código não é dita como ausência de alocação", () => {
+  // A LD pode afirmar ALOCADO sem trazer o código da GRDT — 379 linhas das LDs
+  // vigentes estão assim. A triagem já distingue o caso (o resumo dela diz
+  // "com alocação (confirmada)"); eram as telas que colapsavam isso em "sem
+  // alocação identificada", contando o oposto do que a base diz.
+  const Ui = janela.FlowUi;
+  assert.equal(Ui.situacaoAlocacao({ allocation: "C1O-ALOC-CM-0042-2025" }).estado, "identificada");
+  assert.equal(Ui.situacaoAlocacao({ allocation: "", allocation_status: "ALOCADO" }).estado, "confirmada");
+  assert.equal(Ui.situacaoAlocacao({ allocation: "", allocation_status: "NÃO ALOCADO" }).estado, "ausente");
+  assert.equal(Ui.situacaoAlocacao({ allocation: "", allocation_status: "" }).estado, "ausente");
+  assert.equal(Ui.situacaoAlocacao({}).estado, "ausente");
+  // Tipo sem LD não afirma nada sobre alocação: não procuramos.
+  assert.equal(Ui.situacaoAlocacao({ allocation: "", classification: "TRIAGEM_NAO_APLICAVEL" }).estado,
+    "nao-aplicavel");
+});
+
+check("“NÃO ALOCADO” não é confundido com “ALOCADO”", () => {
+  // Um teste por substring inverteria justamente o caso que importa: o rótulo
+  // negativo contém o positivo.
+  const Ui = janela.FlowUi;
+  ["NÃO ALOCADO", "não alocado", "  NÃO   ALOCADO  "].forEach((status) => {
+    assert.equal(Ui.situacaoAlocacao({ allocation: "", allocation_status: status }).estado, "ausente",
+      `"${status}" não pode virar alocação confirmada`);
+  });
+  assert.equal(Ui.situacaoAlocacao({ allocation: "", allocation_status: " alocado " }).estado, "confirmada");
+});
+
+check("as duas telas usam a mesma leitura da alocação", () => {
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  const acompanhar = fs.readFileSync(path.join(root, "flow_acompanhar.js"), "utf8");
+  assert.match(painel, /Ui\.situacaoAlocacao\(item\)/);
+  assert.match(acompanhar, /root\.FlowUi\.situacaoAlocacao\(item\)/);
+  assert.doesNotMatch(painel, /text: "Sem alocação identificada"/,
+    "o rótulo precisa vir do auxiliar, para as telas não divergirem");
+  // A frase "sem alocação identificada" continua válida — no ramo em que a LD
+  // de fato não aloca. O que não pode voltar é a decisão sair do campo sozinho.
+  assert.match(acompanhar, /alocacao\.estado === "confirmada"/);
+  [painel, acompanhar].forEach((fonte) => {
+    assert.doesNotMatch(fonte, /texto\(item\.allocation\)/,
+      "a tela não decide mais pela presença do código; quem decide é o auxiliar");
+  });
+});
+
+// ── Triagem de tipo que não consulta LD ────────────────────────────────────
+
+check("a triagem roda mesmo quando o tipo não consulta LD", () => {
+  // `flow_triage_item` sempre soube gravar TRIAGEM_NAO_APLICAVEL; a criação é
+  // que protegia a chamada com `if tipo.uses_ld then` e nunca a alcançava.
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_27_triagem_sem_ld.sql"), "utf8");
+  assert.match(migracao, /create or replace function public\.flow_create_request/);
+  // O comentário do cabeçalho cita a condição para explicar o que saiu; a
+  // conferência é sobre o código, não sobre a prosa.
+  const codigo = migracao.split("\n").filter((linha) => !linha.trimStart().startsWith("--")).join("\n");
+  assert.doesNotMatch(codigo, /if tipo\.uses_ld then/,
+    "a condição que impedia a triagem precisa sair");
+  assert.match(migracao, /triagem_resultado := public\.flow_triage_request\(nova_solicitacao\)/);
+  assert.match(migracao, /exception when others then/,
+    "a solicitação continua não se perdendo por falha de triagem");
+  assert.match(migracao, /classification = 'TRIAGEM_NAO_APLICAVEL'/,
+    "o que já está gravado precisa ser corrigido");
+  assert.match(migracao, /and not t\.uses_ld/,
+    "o reparo não pode alcançar itens de tipos que usam LD");
+
+  // A classificação existe no vocabulário da interface desde sempre; agora ela
+  // finalmente chega lá.
+  const ui = fs.readFileSync(path.join(root, "flow_ui.js"), "utf8");
+  assert.match(ui, /TRIAGEM_NAO_APLICAVEL: Object\.freeze\(\{ rotulo: "Triagem não aplicável"/);
 });
 
 console.log(JSON.stringify({ app: "GRCON Flow", passou: true, testes: checks.length, nomes: checks }, null, 2));
