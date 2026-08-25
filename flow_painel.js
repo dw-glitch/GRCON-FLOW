@@ -19,7 +19,8 @@
   const ROTULOS_LISTA = (root.FlowExport && root.FlowExport.COLUNAS_PAINEL
     ? root.FlowExport.COLUNAS_PAINEL.map((coluna) =>
       coluna.header.charAt(0) + coluna.header.slice(1).toLocaleLowerCase("pt-BR"))
-    : ["Protocolo", "Tipo", "Solicitante", "Recebida", "Responsável", "Progresso", "Status", "Prazo"]);
+    : ["Protocolo", "Prioridade", "Tipo", "Origem", "Solicitante", "Recebida",
+       "Responsável", "Progresso", "Status", "Prazo"]);
 
   // Cada cabeçalho e a coluna do banco por onde ele ordena, na ordem em que as
   // células são desenhadas. `null` é coluna que não ordena: progresso é uma
@@ -35,6 +36,10 @@
     // está. É a ordem que a operação quer: os urgentes primeiro.
     { coluna: "priority", ascendentePrimeiro: false },
     { coluna: "type_label", ascendentePrimeiro: true },
+    // Ascendente primeiro põe "a_confirmar" no topo, e é onde ele deve estar:
+    // é o único dos cinco valores que depende de uma pessoa identificar um
+    // código antes de o pedido andar. Os dois caminhos decididos podem esperar.
+    { coluna: "origin", ascendentePrimeiro: true },
     { coluna: "requester_name", ascendentePrimeiro: true },
     { coluna: "created_at", ascendentePrimeiro: false },
     { coluna: "owner_name", ascendentePrimeiro: true },
@@ -58,7 +63,7 @@
     tipos: [],
     tiposPorCodigo: new Map(),
     solicitacoes: [],
-    filtros: { busca: "", tipo: "", status: "", classificacao: "", prioridade: "", indicador: "" },
+    filtros: { busca: "", tipo: "", status: "", classificacao: "", prioridade: "", origem: "", indicador: "" },
     // Protocolo junto do id: a seleção atravessa páginas e a exportação de
     // "só selecionadas" precisa do protocolo de linhas que já saíram da tela.
     selecionadas: new Map(),
@@ -278,7 +283,7 @@
     const jaAtivo = estado.filtros.indicador === indicador.chave;
     estado.filtros = {
       busca: estado.filtros.busca, tipo: estado.filtros.tipo,
-      status: "", classificacao: "", prioridade: "", indicador: "",
+      status: "", classificacao: "", prioridade: "", origem: "", indicador: "",
     };
     if (!jaAtivo) {
       estado.filtros.indicador = indicador.chave;
@@ -304,6 +309,7 @@
     if (f.classificacao) filtros.classificacao = f.classificacao;
     if (f.urgentes) filtros.urgentes = true;
     if (f.prioridade) filtros.prioridade = f.prioridade;
+    if (f.origem) filtros.origem = f.origem;
     if (f.hoje) filtros.de = `${new Date().toISOString().slice(0, 10)}T00:00:00`;
     // A ordem entra aqui, e não só na listagem: `protocolos` tem teto, e qual
     // fatia cabe nele depende de como a lista está ordenada.
@@ -436,6 +442,10 @@
         ]),
         elemento("td", { text: solicitacao.type_label }),
         elemento("td", {}, [
+          Ui.seloOrigem(solicitacao.origin)
+            || elemento("span", { style: "color:var(--text-3)", text: "—" }),
+        ]),
+        elemento("td", {}, [
           elemento("span", { text: solicitacao.requester_name }),
           solicitacao.requester_area
             ? elemento("em", { style: "display:block;font-style:normal;font-size:.72rem;color:var(--text-3)", text: solicitacao.requester_area })
@@ -458,7 +468,7 @@
     destino.replaceChildren(
       montarResumoDaLista(),
       elemento("div", { class: "flow-tabela-wrap" }, [
-        elemento("table", { class: "flow-tabela" }, [
+        elemento("table", { class: "flow-tabela lista" }, [
           elemento("thead", {}, [cabecalho]), corpo,
         ]),
       ]),
@@ -1296,15 +1306,34 @@
       carregarSolicitacoes();
     });
 
+    // A bifurcação do plano do cliente como filtro de um clique. "Não se aplica"
+    // fica de fora da lista de propósito: é um recorte que ninguém procura, e
+    // ocupá-lo aqui empurraria para baixo os quatro que a operação usa.
+    const origem = elemento("select", { id: "filtro-origem" });
+    origem.append(elemento("option", { value: "", text: "Qualquer origem" }));
+    Object.entries(Ui.ORIGENS)
+      .filter(([valor]) => valor !== "nao_aplicavel")
+      .forEach(([valor, info]) => {
+        const node = elemento("option", { value: valor, text: info.rotulo });
+        if (valor === estado.filtros.origem) node.selected = true;
+        origem.append(node);
+      });
+    origem.addEventListener("change", () => {
+      estado.filtros.origem = origem.value;
+      estado.filtros.indicador = "";
+      carregarSolicitacoes();
+    });
+
     return elemento("div", { class: "flow-filtros" }, [
       elemento("label", { class: "flow-campo busca", for: "filtro-busca" }, [elemento("span", { text: "Buscar" }), busca]),
       elemento("label", { class: "flow-campo", for: "filtro-tipo" }, [elemento("span", { text: "Tipo" }), tipo]),
       elemento("label", { class: "flow-campo", for: "filtro-status" }, [elemento("span", { text: "Status" }), status]),
       elemento("label", { class: "flow-campo", for: "filtro-prioridade" }, [elemento("span", { text: "Prioridade" }), prioridade]),
+      elemento("label", { class: "flow-campo", for: "filtro-origem" }, [elemento("span", { text: "Origem" }), origem]),
       elemento("button", {
         class: "text-button", type: "button", text: "Limpar filtros",
         onclick: () => {
-          estado.filtros = { busca: "", tipo: "", status: "", classificacao: "", prioridade: "", indicador: "" };
+          estado.filtros = { busca: "", tipo: "", status: "", classificacao: "", prioridade: "", origem: "", indicador: "" };
           renderAba();
           carregarSolicitacoes();
           montarIndicadores(document.getElementById("painel-indicadores"));

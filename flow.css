@@ -322,6 +322,13 @@
   .flow-tabela td { min-width: 5rem; }
   /* Na ficha o espaço é estreito e as colunas variam por tipo; a tabela mantém
      a largura natural e o contêiner rola. */
+  /* A lista de solicitações tem dez colunas. Sem largura mínima a tabela se
+     encolhe até caber, e o navegador começa a quebrar palavra no meio
+     ("Postage/m no SIGEM"). O contêiner já rola; o que faltava era a tabela
+     poder ficar maior que ele em vez de se espremer. Em tela de 1280px as dez
+     colunas ainda cabem sem barra. */
+  .flow-tabela.lista { min-width: 68rem; }
+  .flow-tabela.lista td { overflow-wrap: normal; word-break: normal; }
   .flow-drawer-corpo .flow-tabela { min-width: 46rem; }
   .flow-tabela .col-check { width: 2.2rem; }
   .flow-tabela .protocolo { font-family: var(--font-mono); font-size: .76rem; color: var(--brand-800); font-weight: 700; white-space: nowrap; }
@@ -336,6 +343,22 @@
   }
   .flow-selo.prioridade-alta { background: var(--warning-100); color: var(--warning-800); }
   .flow-selo.prioridade-baixa { background: var(--surface-3); color: var(--text-3); }
+
+  /* ── Origem: NOVO × JÁ PREVISTO ────────────────────────────────────────
+     As cores são as que o cliente desenhou na folha: verde para documento
+     novo, azul para revisão de documento já previsto. Como na urgência, a cor
+     é reforço — a palavra está escrita no selo e vai por extenso para o Excel.
+
+     "A confirmar" fica em âmbar porque é o único que pede ação de uma pessoa
+     antes de o pedido andar; "misto" fica neutro de propósito, para não
+     competir com os dois caminhos que ele contém. */
+  .flow-selo.origem-novo { background: var(--success-100); color: var(--success-700); font-weight: 700; }
+  .flow-selo.origem-previsto { background: var(--brand-100); color: var(--brand-800); font-weight: 700; }
+  .flow-selo.origem-confirmar { background: var(--warning-100); color: var(--warning-800); font-weight: 700; }
+  .flow-selo.origem-misto {
+    background: var(--surface-3); color: var(--text-2); font-weight: 700;
+    box-shadow: inset 0 0 0 1px var(--border-2);
+  }
 
   .flow-tabela tr.urgente-urgente td:first-child { box-shadow: inset 3px 0 0 var(--danger-700); }
   .flow-tabela tr.urgente-alta td:first-child { box-shadow: inset 3px 0 0 var(--warning-800); }

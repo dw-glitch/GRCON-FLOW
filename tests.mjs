@@ -192,7 +192,7 @@ check("a exportação reproduz as 26 colunas do Controle de Solicitações", () 
 check("a primeira aba do Excel tem as mesmas colunas visíveis no painel", () => {
   const headers = Export.COLUNAS_PAINEL.map((coluna) => coluna.header);
   assert.deepEqual(headers, [
-    "PROTOCOLO", "PRIORIDADE", "TIPO", "SOLICITANTE", "RECEBIDA",
+    "PROTOCOLO", "PRIORIDADE", "TIPO", "ORIGEM", "SOLICITANTE", "RECEBIDA",
     "RESPONSÁVEL", "PROGRESSO", "STATUS", "PRAZO",
   ]);
   const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
@@ -942,6 +942,103 @@ check("a triagem roda mesmo quando o tipo não consulta LD", () => {
 });
 
 // ── Urgência ───────────────────────────────────────────────────────────────
+
+check("cabeçalho, ordenação e célula da lista andam no mesmo índice", () => {
+  // O painel monta os cabeçalhos a partir de COLUNAS_PAINEL e as ordenações a
+  // partir de uma lista paralela, casadas por posição. Acrescentar uma coluna
+  // no Excel sem acrescentar a ordenação correspondente desloca todas as
+  // seguintes: clicar em "Status" passaria a ordenar por prazo, calado.
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  const bloco = painel.match(/const ORDENS_DA_LISTA = Object\.freeze\(\[([\s\S]*?)\]\);/);
+  assert.ok(bloco, "ORDENS_DA_LISTA precisa existir");
+  const entradas = bloco[1].split("\n")
+    .map((linha) => linha.trim())
+    .filter((linha) => linha.startsWith("{ coluna:") || linha === "null,");
+  assert.equal(
+    entradas.length, Export.COLUNAS_PAINEL.length,
+    "cada coluna do painel precisa de uma entrada de ordenação, mesmo que null"
+  );
+
+  // E a linha precisa desenhar o mesmo número de células.
+  const corpo = painel.match(/const linha = elemento\("tr", \{ class: classes \}, \[([\s\S]*?)\n      \]\);/);
+  assert.ok(corpo, "a montagem da linha precisa existir");
+  const celulas = (corpo[1].match(/^        elemento\("td"/gm) || []).length;
+  assert.equal(
+    celulas, Export.COLUNAS_PAINEL.length + 1,
+    "a linha tem uma célula por coluna, mais a caixa de seleção"
+  );
+});
+
+check("a origem é agregada pelo banco, não adivinhada pela tela", () => {
+  // O painel lista solicitações; a presença em LD é do item. Derivar a origem
+  // no navegador só funcionaria com todos os itens carregados — e a lista é
+  // paginada no servidor. Fora isso, coluna derivada no cliente não ordena e
+  // não filtra sem mentir no total do rodapé.
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /origin: "origin"/, "origem precisa ser coluna ordenável no servidor");
+  assert.match(api, /if \(filtros\.origem\) consulta = consulta\.eq\("origin", filtros\.origem\)/);
+  assert.match(api, /consulta\.eq\("request_origin", filtros\.origem\)/,
+    "a exportação precisa recortar pelo mesmo filtro da tela");
+
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /Ui\.seloOrigem\(solicitacao\.origin\)/);
+  assert.match(painel, /id: "filtro-origem"/);
+  assert.match(painel, /if \(f\.origem\) filtros\.origem = f\.origem;/,
+    "o filtro escolhido na tela precisa chegar à consulta");
+});
+
+check("o vocabulário da origem é o mesmo que o banco aceita", () => {
+  const Ui = janela.FlowUi;
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_30_origem_novo_ou_previsto.sql"), "utf8"
+  );
+  // A tela não pode oferecer um valor que a restrição do banco recusa.
+  Object.keys(Ui.ORIGENS).forEach((valor) => {
+    assert.ok(
+      new RegExp(`'${valor}'`).test(migracao),
+      `a origem "${valor}" precisa constar da restrição da flow_30`
+    );
+  });
+  assert.match(migracao, /check \(origin in \('', 'novo', 'previsto', 'misto', 'a_confirmar', 'nao_aplicavel'\)\)/);
+
+  // A presença no item vem da flow_25 e não pode ser reinventada aqui.
+  const flow25 = fs.readFileSync(
+    path.join(root, "database/migrations/flow_25_triage_requester_dwg_limits.sql"), "utf8"
+  );
+  Object.keys(Ui.PRESENCAS_EM_LD).forEach((valor) => {
+    assert.ok(
+      new RegExp(`'${valor}'`).test(flow25),
+      `a presença "${valor}" precisa ser um valor real de ld_presence_status`
+    );
+  });
+});
+
+check("o gatilho do agregado ouve as colunas que a triagem escreve", () => {
+  // Sem isto o agregado nasce certo no registro e congela: a triagem escreve
+  // classification e ld_presence_status, nunca status.
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_30_origem_novo_ou_previsto.sql"), "utf8"
+  );
+  assert.match(
+    migracao,
+    /after insert or delete or update of status, classification, ld_presence_status/,
+    "o gatilho precisa disparar também nas colunas da triagem"
+  );
+  assert.match(migracao, /perform public\.flow_refresh_request_progress\(alvo\)/,
+    "o backfill deve usar a mesma função do gatilho, e não uma regra paralela");
+});
+
+check("a origem sai por extenso na planilha e não entra no Controle Oficial", () => {
+  const exportacao = fs.readFileSync(path.join(root, "flow_export.js"), "utf8");
+  assert.match(exportacao, /nao_aplicavel: ""/,
+    "o tipo que não consulta LD não escreve nada na coluna");
+  assert.match(exportacao, /previsto: "JÁ PREVISTO"/);
+  assert.ok(
+    !Report.CONTROL_COLUMNS.some((coluna) => /ORIGEM/i.test(String(coluna))),
+    "o Controle Oficial tem as 26 colunas da planilha do cliente, e ORIGEM não é uma delas"
+  );
+});
+
 
 check("o solicitante consegue marcar o próprio pedido como urgente", () => {
   // flow_update_request recusa quem não é da equipe, e o papel padrão de todo
