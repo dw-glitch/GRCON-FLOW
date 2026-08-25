@@ -968,6 +968,23 @@ check("o solicitante consegue marcar o próprio pedido como urgente", () => {
   assert.match(migracao, /grant execute on function public\.flow_set_request_priority/);
 });
 
+check("o RPC de prioridade não fica exposto ao papel anônimo", () => {
+  // O Supabase concede execute a anon por privilégio padrão quando a função
+  // nasce em public, e `revoke from public` não alcança concessão nominal a
+  // papel. Sem a revogação explícita, esta seria a única das 57 funções flow_*
+  // com anon na ACL. A trava de auth.uid() já barra a chamada; isto é a lista
+  // de permissões concordando com o que a função faz.
+  const migracoes = fs.readdirSync(path.join(root, "database/migrations"))
+    .filter((nome) => nome.endsWith(".sql"))
+    .map((nome) => fs.readFileSync(path.join(root, "database/migrations", nome), "utf8"))
+    .join("\n");
+  assert.match(
+    migracoes,
+    /revoke execute on function public\.flow_set_request_priority\(uuid, text, text\) from anon/,
+    "falta revogar execute de anon no RPC de prioridade"
+  );
+});
+
 check("a tela pública não mostra detalhe técnico ao solicitante", () => {
   // flow_solicitar_public.js existe para manter erro de SQL/RLS fora dos olhos
   // de quem só quer registrar um pedido. Um aviso novo não pode furar isso.
