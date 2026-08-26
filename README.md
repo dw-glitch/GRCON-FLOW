@@ -41,6 +41,13 @@ Histórico completo · Exportação do Controle de Solicitações
 | `/acompanhar` | quem solicitou | Consulta pelo protocolo e lista os próprios pedidos. |
 | `/painel` | equipe de qualidade | Dashboard, triagem, distribuição, Base de LDs, tipos, usuários e acesso. |
 
+**Aviso é para quem executa, não para quem pede.** Por decisão do cliente, o
+solicitante não recebe notificação: ele acompanha o pedido em `/acompanhar`,
+pelo protocolo. Quem é avisado é a equipe de qualidade — quem de fato executa a
+atividade. O registro de uma nova solicitação notifica todo perfil ativo com
+papel de operador, administrador ou proprietário, e a caixa de entrada do painel
+é a fonte da verdade desses avisos.
+
 A lista do painel é paginada no servidor: 25, 50, 100 ou 200 por página, com o
 total do recorte e a posição sempre à vista. Todo filtro — inclusive "atrasadas",
 "sem responsável" e os recortes por classificação — é aplicado no banco, e não

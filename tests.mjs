@@ -943,6 +943,37 @@ check("a triagem roda mesmo quando o tipo não consulta LD", () => {
 
 // ── Urgência ───────────────────────────────────────────────────────────────
 
+check("o solicitante não é notificado; a equipe continua sendo", () => {
+  // Decisão do cliente: quem precisa ser avisado é o executor da atividade — a
+  // equipe de qualidade —, pelo canal do Teams. O solicitante não recebe nada.
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_33_sem_aviso_ao_solicitante.sql"), "utf8"
+  );
+  const corpo = migracao.match(
+    /create or replace function public\.flow_update_request\([\s\S]*?\n\$\$;/
+  );
+  assert.ok(corpo, "a função precisa ser recriada na migração");
+  assert.ok(
+    !corpo[0].includes("flow_notifications"),
+    "alterar a solicitação não pode mais gerar aviso ao solicitante"
+  );
+
+  // E o que a decisão quer manter tem que continuar de pé: o aviso à equipe no
+  // registro vem de flow_notify_new_request, que esta migração não toca.
+  assert.ok(
+    !migracao.includes("create or replace function public.flow_notify_new_request"),
+    "o aviso à equipe no registro não pode ser alterado por esta migração"
+  );
+
+  // A trava do par PDF+Excel e o histórico continuam dentro da função: remover
+  // o aviso não pode ter levado junto o resto do corpo.
+  assert.match(corpo[0], /LI\/MC da N-1710 sem o conjunto PDF \+ Excel/,
+    "a regra do contrato precisa continuar na função");
+  assert.match(corpo[0], /'solicitacao_alterada', p_field/,
+    "o histórico precisa continuar sendo gravado");
+});
+
+
 check("a família normativa em SQL não diverge da regra do core.js", () => {
   // Há duas implementações da mesma regra: core.js valida a codificação na
   // importação da LD, e a flow_31 responde no banco, que é quem escreve o item.
