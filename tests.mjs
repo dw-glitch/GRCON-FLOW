@@ -526,14 +526,18 @@ check("o painel mantém uma caixa persistente de notificações não lidas", () 
     "avisos continuam sendo criados apenas pelo gatilho do banco");
 });
 
-check("todo tipo de solicitação aceita até trinta anexos PDF, Excel, Word e DWG de 10 MB", () => {
-  // O contrato do formulário é o mesmo do banco (migração flow_25). Quando as
-  // duas pontas discordam, o arquivo sobe e o registro é recusado — o pior dos
-  // dois mundos, porque o solicitante já acha que anexou.
+check("todo tipo de solicitação aceita até trinta anexos de documento, DWG ou imagem", () => {
+  // O contrato do formulário é o mesmo do banco (migrações flow_25 a flow_32).
+  // Quando as duas pontas discordam, o arquivo sobe e o registro é recusado — o
+  // pior dos dois mundos, porque o solicitante já acha que anexou.
   const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
-  ["pdf", "xls", "xlsx", "xlsm", "doc", "docx", "dwg"].forEach((extensao) => {
-    assert.match(api, new RegExp(`EXTENSOES_ANEXO[^\\n]+[\"']${extensao}[\"']`),
-      `falta suporte a .${extensao}`);
+  // A lista virou duas constantes (documento + imagem); a asserção lê o bloco
+  // inteiro em vez de uma linha, para não quebrar quando ela for reformatada.
+  const bloco = api.match(/const EXTENSOES_IMAGEM[\s\S]*?const ACEITE_ANEXO/);
+  assert.ok(bloco, "as listas de extensão precisam existir");
+  ["pdf", "xls", "xlsx", "xlsm", "doc", "docx", "dwg",
+   "jpg", "jpeg", "png", "webp", "heic", "heif"].forEach((extensao) => {
+    assert.ok(bloco[0].includes(`"${extensao}"`), `falta suporte a .${extensao}`);
   });
   assert.match(api, /validarAnexo\(arquivo\)/, "a API precisa validar antes do upload");
   assert.match(api, /TETO_ANEXOS = 30/);
@@ -942,6 +946,80 @@ check("a triagem roda mesmo quando o tipo não consulta LD", () => {
 });
 
 // ── Urgência ───────────────────────────────────────────────────────────────
+
+check("imagem é anexo válido nos quatro portões", () => {
+  // São quatro lugares que precisam concordar; passar num e falhar no seguinte
+  // deixa o arquivo órfão no bucket ou o erro sem explicação na tela.
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_32_anexo_de_imagem.sql"), "utf8"
+  );
+  ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].forEach((mime) => {
+    assert.ok(migracao.includes(`'${mime}'`), `o bucket precisa aceitar ${mime}`);
+  });
+  assert.match(migracao, /'jpg','jpeg','png','webp','heic','heif'/,
+    "a restrição de extensão precisa listar as imagens");
+  assert.match(migracao, /when 'jpg'\s+then mime_type = any/,
+    "a restrição de MIME confere por extensão");
+  assert.match(migracao, /'jpg','jpeg','png','webp','heic','heif'\) then\s*\n\s*raise exception 'Formato de anexo não permitido/,
+    "o RPC de registro precisa aceitar as mesmas extensões");
+
+  // E a tela precisa oferecer exatamente o que o banco aceita.
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  const lista = api.match(/const EXTENSOES_IMAGEM = Object\.freeze\(\[([^\]]*)\]\)/);
+  assert.ok(lista, "EXTENSOES_IMAGEM precisa existir");
+  ["jpg", "jpeg", "png", "webp", "heic", "heif"].forEach((ext) => {
+    assert.ok(lista[1].includes(`"${ext}"`), `a tela precisa oferecer .${ext}`);
+  });
+});
+
+check("o conjunto obrigatório da N-1710 continua recusando imagem", () => {
+  // A regra é do contrato: LI/MC exige PDF e Excel do mesmo documento. Abrir
+  // para imagem aqui deixaria a solicitação concluir sem a representação que a
+  // norma pede.
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_32_anexo_de_imagem.sql"), "utf8"
+  );
+  assert.match(
+    migracao,
+    /if extension not in \('pdf','xls','xlsx','xlsm'\) then\s*\n\s*raise exception 'LI\/MC da N-1710/,
+    "o ramo LI/MC não pode ganhar formatos novos"
+  );
+});
+
+check("foto grande é reduzida antes de ser recusada, e só então", () => {
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+
+  // A redução é último recurso: abaixo do limite o original sobe intacto,
+  // porque o canvas descarta o EXIF — data, orientação e coordenada da foto.
+  const preparar = api.match(/async function prepararAnexo\(arquivo\) \{[\s\S]*?\n  \}/);
+  assert.ok(preparar, "prepararAnexo precisa existir");
+  assert.match(preparar[0], /if \(arquivo\.size <= limiteDeBytes\(\)\) return \{ arquivo, error: null \}/,
+    "arquivo dentro do limite não pode passar pelo canvas");
+  assert.match(preparar[0], /ehImagem\(arquivo\) \? await reduzirImagem\(arquivo\) : null/,
+    "só imagem é reduzida; documento grande continua recusado");
+
+  // A orientação do EXIF precisa ser aplicada, senão a foto chega deitada.
+  assert.match(api, /imageOrientation: "from-image"/);
+  // E o nome tem que acompanhar o formato real, senão a restrição de MIME recusa.
+  assert.match(api, /\.replace\(\/\\\.\[\^\.\]\+\$\/, ""\)\}\.jpg/,
+    "o arquivo reduzido vira .jpg e o nome precisa dizer isso");
+
+  // E o envio precisa usar o preparo, não a validação antiga.
+  assert.match(api, /const preparado = await prepararAnexo\(arquivoOriginal\)/);
+});
+
+check("a tela pública consegue explicar a recusa por tamanho", () => {
+  // flow_solicitar_public.js só deixa passar mensagem que casa com um padrão
+  // seguro; sem o padrão do tamanho, o solicitante veria "não foi possível
+  // enviar" sem saber que a foto é grande demais.
+  const publico = fs.readFileSync(path.join(root, "flow_solicitar_public.js"), "utf8");
+  assert.match(publico, /\/tem mais de \\d\+ MB\/i/,
+    "a mensagem de tamanho precisa ser considerada segura para o solicitante");
+
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /tem mais de \$\{config\.uploadMaxMb \|\| 10\} MB/,
+    "a mensagem do cliente precisa casar com o padrão da tela pública");
+});
 
 check("o solicitante não é notificado; a equipe continua sendo", () => {
   // Decisão do cliente: quem precisa ser avisado é o executor da atividade — a

@@ -13,10 +13,11 @@
   const BaseDocs = root.FlowDocs;
   if (!Api || !BaseDocs) return;
 
-  const FILE_EXTENSIONS = /\.(?:pdf|docx?|xlsx?|xlsm|dwg)$/i;
+  const FILE_EXTENSIONS = /\.(?:pdf|docx?|xlsx?|xlsm|dwg|jpe?g|png|webp|heic|heif)$/i;
   const SAFE_ERROR_PATTERNS = [
     /limite de \d+ anexos/i,
     /no máximo \d+ MB/i,
+    /tem mais de \d+ MB/i,
     /arquivo.*vazio/i,
     /LI\/MC.*N-1710/i,
     /PDF.*Excel/i,
