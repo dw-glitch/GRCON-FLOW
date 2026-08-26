@@ -39,11 +39,20 @@
   // A extensão é a fonte mais estável aqui porque alguns navegadores não
   // informam o MIME de arquivos do Office (ou informam application/octet-stream).
   // Os mesmos limites valem no banco e no bucket (migração flow_25).
-  const EXTENSOES_ANEXO = Object.freeze(["pdf", "xls", "xlsx", "xlsm", "doc", "docx", "dwg"]);
+  // Imagem entra na flow_32: o sistema guarda evidência de campo, e foto é a
+  // forma mais comum dela. As extensões aqui espelham a restrição do banco —
+  // oferecer na tela um formato que o banco recusa é prometer o que não cumpre.
+  const EXTENSOES_IMAGEM = Object.freeze(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
+  const EXTENSOES_ANEXO = Object.freeze([
+    "pdf", "xls", "xlsx", "xlsm", "doc", "docx", "dwg", ...EXTENSOES_IMAGEM,
+  ]);
   const ACEITE_ANEXO = EXTENSOES_ANEXO.map((extensao) => `.${extensao}`).join(",");
   const TETO_ANEXOS = 30;
   const MAXIMO_ANEXOS = Math.min(TETO_ANEXOS, Math.max(1, Number(config.uploadMaxFiles) || TETO_ANEXOS));
-  const FORMATOS_ANEXO = "PDF, Excel, Word ou DWG";
+  const FORMATOS_ANEXO = "PDF, Excel, Word, DWG ou imagem";
+  // Lado maior da foto reduzida. 2200 px preserva leitura de placa, etiqueta e
+  // trinca — que é o que uma evidência precisa mostrar.
+  const LADO_MAXIMO_IMAGEM = 2200;
   const MIME_ANEXO = Object.freeze({
     pdf: "application/pdf",
     xls: "application/vnd.ms-excel",
@@ -52,7 +61,21 @@
     doc: "application/msword",
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     dwg: "application/acad",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+    heic: "image/heic",
+    heif: "image/heif",
   });
+
+  function ehImagem(arquivo) {
+    return EXTENSOES_IMAGEM.includes(extensaoDoAnexo(arquivo));
+  }
+
+  function limiteDeBytes() {
+    return (Number(config.uploadMaxMb) || 10) * 1024 * 1024;
+  }
 
   function extensaoDoAnexo(arquivo) {
     return texto(arquivo && arquivo.name).toLowerCase().split(".").pop();
@@ -65,11 +88,70 @@
       return `“${arquivo.name}” não é ${FORMATOS_ANEXO}.`;
     }
     if (!Number(arquivo.size)) return `“${arquivo.name}” está vazio.`;
-    const limiteMb = config.uploadMaxMb || 10;
-    if (arquivo.size > limiteMb * 1024 * 1024) {
-      return `“${arquivo.name}” tem mais de ${limiteMb} MB.`;
+    // Foto grande não é recusada aqui: `prepararAnexo` tenta reduzi-la antes de
+    // desistir. Dizer "passou do tamanho" para um arquivo que o sistema
+    // consegue enviar seria recusar o que ele aceita.
+    if (!ehImagem(arquivo) && arquivo.size > limiteDeBytes()) {
+      return `“${arquivo.name}” tem mais de ${config.uploadMaxMb || 10} MB.`;
     }
     return null;
+  }
+
+  /**
+   * Reduz a foto no navegador, e só quando ela seria recusada por tamanho.
+   *
+   * Abaixo do limite o arquivo original sobe intacto — com EXIF, o que inclui
+   * data, orientação e coordenada. Numa evidência de campo esses metadados
+   * podem valer tanto quanto a imagem, e o `canvas` os descarta. Por isso a
+   * redução é último recurso antes da recusa, nunca o caminho normal.
+   *
+   * Falha silenciosa é aceitável aqui: se o navegador não souber decodificar o
+   * formato (HEIC no Chrome, por exemplo), devolvemos null e quem chamou
+   * recusa com a mensagem de tamanho, que é a verdade.
+   */
+  async function reduzirImagem(arquivo) {
+    if (typeof root.createImageBitmap !== "function" || typeof root.OffscreenCanvas === "undefined") {
+      return null;
+    }
+    try {
+      // `imageOrientation` aplica o giro do EXIF antes de desenhar; sem isso a
+      // foto de celular chega deitada.
+      const bitmap = await root.createImageBitmap(arquivo, { imageOrientation: "from-image" });
+      const maior = Math.max(bitmap.width, bitmap.height);
+      const escala = maior > LADO_MAXIMO_IMAGEM ? LADO_MAXIMO_IMAGEM / maior : 1;
+      const largura = Math.round(bitmap.width * escala);
+      const altura = Math.round(bitmap.height * escala);
+      const tela = new root.OffscreenCanvas(largura, altura);
+      const contexto = tela.getContext("2d");
+      if (!contexto) { bitmap.close(); return null; }
+      contexto.drawImage(bitmap, 0, 0, largura, altura);
+      bitmap.close();
+      const blob = await tela.convertToBlob({ type: "image/jpeg", quality: 0.85 });
+      if (!blob || blob.size >= arquivo.size) return null;
+      // O nome ganha a extensão do formato real: gravar um JPEG com nome .png
+      // faria a restrição de MIME do banco recusar, e com razão.
+      const nome = `${texto(arquivo.name).replace(/\.[^.]+$/, "")}.jpg`;
+      return new File([blob], nome, { type: "image/jpeg", lastModified: Date.now() });
+    } catch (erro) {
+      console.error("[GRCON Flow · não foi possível reduzir a imagem]", erro);
+      return null;
+    }
+  }
+
+  /** Devolve o arquivo pronto para subir, ou o motivo de não subir. */
+  async function prepararAnexo(arquivo) {
+    const erro = validarAnexo(arquivo);
+    if (erro) return { arquivo: null, error: erro };
+    if (arquivo.size <= limiteDeBytes()) return { arquivo, error: null };
+
+    const reduzido = ehImagem(arquivo) ? await reduzirImagem(arquivo) : null;
+    if (reduzido && reduzido.size <= limiteDeBytes()) {
+      return { arquivo: reduzido, error: null };
+    }
+    return {
+      arquivo: null,
+      error: `“${arquivo.name}” tem mais de ${config.uploadMaxMb || 10} MB.`,
+    };
   }
 
   /**
@@ -857,11 +939,15 @@
     accept: ACEITE_ANEXO,
     maximo: MAXIMO_ANEXOS,
     formatos: FORMATOS_ANEXO,
+    extensoes: EXTENSOES_ANEXO,
+    imagens: EXTENSOES_IMAGEM,
     validar: validarAnexo,
+    preparar: prepararAnexo,
 
-    async enviar(requestId, arquivo, itemId = null) {
-      const erroArquivo = validarAnexo(arquivo);
-      if (erroArquivo) return { data: null, error: erroArquivo };
+    async enviar(requestId, arquivoOriginal, itemId = null) {
+      const preparado = await prepararAnexo(arquivoOriginal);
+      if (preparado.error) return { data: null, error: preparado.error };
+      const arquivo = preparado.arquivo;
       const nomeSeguro = arquivo.name.replace(/[^\w.\- ]+/g, "_");
       const identificador = root.crypto && typeof root.crypto.randomUUID === "function"
         ? root.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;

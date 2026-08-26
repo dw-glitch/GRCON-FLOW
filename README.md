@@ -102,10 +102,24 @@ a divergência é mostrada para alguém decidir.
 versão de LD que usou. A análise anterior permanece.
 
 **Anexos ficam privados.** Todo tipo de solicitação aceita até 30 arquivos em
-PDF, Excel (`.xls`, `.xlsx`, `.xlsm`), Word (`.doc`, `.docx`) e DWG, com até
-10 MB por arquivo. O solicitante vê o resultado de cada envio e pode tentar
-novamente se algum falhar. A equipe baixa o arquivo original na ficha da
-solicitação por um link temporário; o bucket não é público.
+PDF, Excel (`.xls`, `.xlsx`, `.xlsm`), Word (`.doc`, `.docx`), DWG e imagem
+(`.jpg`, `.jpeg`, `.png`, `.webp`, `.heic`, `.heif`), com até 10 MB por
+arquivo. O solicitante vê o resultado de cada envio e pode tentar novamente se
+algum falhar. A equipe baixa o arquivo original na ficha da solicitação por um
+link temporário; o bucket não é público.
+
+**Foto grande é reduzida, não recusada.** Quando uma imagem passa do limite, o
+navegador a redimensiona para 2200 px no maior lado e reenvia como JPEG. A
+redução é **último recurso antes da recusa**, nunca o caminho normal: abaixo do
+limite o arquivo original sobe intacto, porque o `canvas` descarta o EXIF — data,
+orientação e coordenada da foto —, e numa evidência de campo esses metadados
+podem valer tanto quanto a imagem. Documento grande continua recusado: não há
+como reduzir um PDF sem perder conteúdo.
+
+**Imagem não entra no conjunto obrigatório da N-1710.** LI/MC exige PDF *e*
+Excel do mesmo documento, e a regra é do contrato. Uma foto anexada a um item
+LI/MC é recusada com a explicação; em qualquer outro item ela entra como anexo
+complementar e conta no teto de 30.
 
 **Exclusão é administrativa e permanente.** Administrador e proprietário podem
 excluir uma solicitação pela ficha do painel. Uma caixa única mostra o que vai
@@ -386,7 +400,7 @@ da configuração do GRCON principal na hospedagem.
 | --- | --- |
 | `FLOW_SUPABASE_URL` | Apontar para outro projeto (homologação, por exemplo). |
 | `FLOW_SUPABASE_ANON_KEY` | A chave **publicável** do projeto. |
-| `FLOW_UPLOAD_MAX_MB` | Tamanho máximo de cada anexo (padrão 10). |
+| `FLOW_UPLOAD_MAX_MB` | Tamanho máximo de cada anexo (padrão 10). Imagem acima disso é reduzida no navegador em vez de recusada. |
 | `FLOW_UPLOAD_MAX_FILES` | Quantidade máxima de anexos por solicitação (padrão 30, o mesmo teto do banco). |
 | `FLOW_STORAGE_QUOTA_MB` | Cota usada pela barra do painel (padrão 1024 MB no plano Free). |
 | `FLOW_LD_UPLOAD_MAX_MB` | Tamanho máximo do arquivo de LD (padrão 100). |
