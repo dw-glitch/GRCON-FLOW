@@ -943,6 +943,87 @@ check("a triagem roda mesmo quando o tipo não consulta LD", () => {
 
 // ── Urgência ───────────────────────────────────────────────────────────────
 
+check("a família normativa em SQL não diverge da regra do core.js", () => {
+  // Há duas implementações da mesma regra: core.js valida a codificação na
+  // importação da LD, e a flow_31 responde no banco, que é quem escreve o item.
+  // O precedente é flow_is_n1710_li_mc (flow_24). O que impede divergência é
+  // este teste: ele lê as duas e compara os literais que decidem a família.
+  const core = fs.readFileSync(path.join(root, "core.js"), "utf8");
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_31_familia_normativa.sql"), "utf8"
+  );
+
+  // O core.js decide ET em validateDocumentCode por conter "_RNEST_" — e não
+  // pelo regex estrito de isEtDocument, que reprova ET mal codificado.
+  assert.match(core, /sheet === "ET" \|\| raw\.includes\("_RNEST_"\)/,
+    "se o core.js mudar o teste de ET, a flow_31 precisa mudar junto");
+  assert.match(migracao, /valor like '%\\_RNEST\\_%' then 'ET'/,
+    "o SQL precisa usar o mesmo teste frouxo de _RNEST_");
+
+  // O regex de currículo, caractere a caractere.
+  const cv = core.match(/const CV_DOCUMENT_RE = \/\^(.+?)\$\/i;/);
+  assert.ok(cv, "CV_DOCUMENT_RE precisa existir em core.js");
+  assert.ok(
+    migracao.includes(`^${cv[1]}$`),
+    `o regex de CV do SQL precisa ser o mesmo do core.js: ^${cv[1]}$`
+  );
+
+  // A ordem dos ramos importa: ET antes de CV antes de N-1710.
+  const iEt = migracao.indexOf("then 'ET'");
+  const iCv = migracao.indexOf("then 'CV'");
+  const iN = migracao.indexOf("else 'N-1710'");
+  assert.ok(iEt > 0 && iEt < iCv && iCv < iN, "a ordem dos ramos deve seguir validateDocumentCode");
+});
+
+check("a família fica vazia quando não há código, e é restrita no banco", () => {
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_31_familia_normativa.sql"), "utf8"
+  );
+  assert.match(migracao, /check \(norm_family in \('', 'N-1710', 'ET', 'CV'\)\)/);
+  assert.match(migracao, /when coalesce\(btrim\(valor\), ''\) = '' then ''/,
+    "título solto não tem norma que o reja — não pode virar N-1710 por omissão");
+
+  // O gatilho que já preparava o item é quem preenche, do mesmo código.
+  assert.match(migracao, /new\.norm_family := public\.flow_document_family\(new\.document\)/);
+
+  // O backfill não passa pelo gatilho de propósito: ele recalcula seis campos e
+  // levantaria a exceção do par PDF+Excel em item já concluído.
+  assert.match(migracao, /update public\.flow_request_items\s*\n\s*set norm_family =/,
+    "o backfill deve escrever a coluna direto");
+
+  const Ui = janela.FlowUi;
+  assert.deepEqual(Object.keys(Ui.FAMILIAS_NORMATIVAS), ["N-1710", "ET", "CV"]);
+  assert.equal(Ui.seloFamilia(""), null, "sem código, sem selo");
+  assert.equal(Ui.seloFamilia("INVENTADA"), null, "valor fora da lista não vira selo");
+});
+
+check("a família é sigla e sem cor própria", () => {
+  // O código de cores da folha do cliente tem três entradas, todas em uso.
+  // Uma quarta paleta aqui competiria com as que já carregam significado.
+  const ui = fs.readFileSync(path.join(root, "flow_ui.js"), "utf8");
+  const bloco = ui.match(/function seloFamilia\(valor\) \{[\s\S]*?\n  \}/);
+  assert.ok(bloco, "seloFamilia precisa existir");
+  assert.match(bloco[0], /class: "flow-selo neutro"/,
+    "a família usa o selo neutro; cor é reservada a urgência e origem");
+
+  const css = fs.readFileSync(path.join(root, "flow.css"), "utf8");
+  assert.ok(!/\.flow-selo\.familia-/.test(css), "não deve haver paleta própria para a família");
+
+  // E a sigla é o texto do selo, não o nome da norma por extenso.
+  assert.match(bloco[0], /text: chave/);
+});
+
+check("a NORMA entra na aba de itens e não no Controle Oficial", () => {
+  const headers = Export.COLUNAS_ITENS.map((coluna) => coluna.header);
+  assert.ok(headers.includes("NORMA"), "a aba de itens precisa da coluna");
+  assert.ok(
+    !Report.CONTROL_COLUMNS.some((coluna) => /^NORMA$/i.test(String(coluna).trim())),
+    "o Controle Oficial tem as 26 colunas da planilha do cliente"
+  );
+  assert.equal(Report.CONTROL_COLUMNS.length, 26);
+});
+
+
 check("cabeçalho, ordenação e célula da lista andam no mesmo índice", () => {
   // O painel monta os cabeçalhos a partir de COLUNAS_PAINEL e as ordenações a
   // partir de uma lista paralela, casadas por posição. Acrescentar uma coluna

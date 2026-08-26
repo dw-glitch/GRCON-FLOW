@@ -170,6 +170,11 @@
       },
     },
     classification: { rotulo: "Classificação", celula: (item, tipo) => seloClassificacao(item.classification, tipo && tipo.not_found_is_expected) },
+    norm_family: {
+      rotulo: "Norma",
+      celula: (item) => Ui.seloFamilia(item.norm_family)
+        || elemento("span", { style: "color:var(--text-3)", text: "—" }),
+    },
   };
 
   function colunasDoTipo(codigo) {
@@ -927,6 +932,9 @@
       ]),
       elemento("div", { style: "display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.8rem" }, [
         seloClassificacao(item.classification, tipo && tipo.not_found_is_expected),
+        // Qual norma rege este código. Fica junto da classificação porque as
+        // duas respondem à mesma pergunta da equipe: o que fazer com este item.
+        Ui.seloFamilia(item.norm_family),
         item.needs_validation ? elemento("span", { class: "flow-selo validar", text: "Precisa de validação" }) : null,
       ]),
       elemento("div", { class: "flow-triagem" }, [
