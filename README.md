@@ -142,6 +142,31 @@ As cores são as que o cliente desenhou: verde para novo, azul para já previsto
 Como na urgência, a cor é reforço — a palavra está escrita no selo e vai por
 extenso para a planilha.
 
+### Família normativa: N-1710 / ET / CV
+
+Qual norma rege o código do documento — a pergunta que o controle em papel
+chama de "identificação do tipo". Não é o tipo do documento (RIR, PR, RL, CE,
+MC), que a LD já traz: é qual regra de codificação vale, porque é ela que define
+o que precisa ser entregue.
+
+| Família | Quando |
+| --- | --- |
+| `ET` | Relatório sob a especificação técnica do contrato (código com `_RNEST_`). |
+| `CV` | Currículo, pelos cinco grupos previstos na ET. |
+| `N-1710` | O caso geral: codificação de documentos de engenharia da Petrobras. |
+| vazio | Item que chegou só com título — não há código para reger. |
+
+Ninguém digita: `flow_document_family` responde a partir do código, e o mesmo
+gatilho que já preparava o item grava a resposta. A regra existe em dois
+lugares — `core.js` valida a codificação na importação da LD, o SQL responde no
+banco, que é quem escreve o item — e há teste que lê os dois e falha se saírem
+de sincronia. É o mesmo arranjo de `flow_is_n1710_li_mc`.
+
+A família **não tem cor própria**, de propósito. O código de cores do controle
+em papel tem três entradas — azul para já previsto, verde para novo, vermelho
+para urgente —, todas em uso. Uma quarta paleta competiria com as que já
+carregam significado; a sigla em selo neutro resolve.
+
 ### Classificações
 
 | Classificação | Quando |

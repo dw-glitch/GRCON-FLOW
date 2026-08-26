@@ -180,6 +180,39 @@
     return PRESENCAS_EM_LD[texto(valor)] || "—";
   }
 
+  /**
+   * Qual norma rege o código do documento — a pergunta que o plano do cliente
+   * chama de "identificação do tipo: N-1710 / ET / CV".
+   *
+   * Não é o tipo do documento (RIR, PR, RL, CE, MC), que a LD já traz. É qual
+   * regra de codificação vale para aquele código, porque é ela que define o que
+   * precisa ser entregue.
+   *
+   * Sem cor, e de propósito. O código de cores da folha do cliente tem três
+   * entradas — azul para já previsto, verde para novo, vermelho para urgente —,
+   * todas já em uso e todas ligadas à urgência ou ao caminho do documento. Ele
+   * não pediu cor para a família, e uma quarta paleta aqui competiria com as
+   * três que hoje carregam significado. A sigla resolve, e é como ele escreveu.
+   */
+  const FAMILIAS_NORMATIVAS = Object.freeze({
+    "N-1710": "Codificação de documentos de engenharia (Petrobras N-1710)",
+    ET: "Especificação técnica do contrato — relatórios RNEST",
+    CV: "Currículo, pelos cinco grupos previstos na ET",
+  });
+
+  function rotuloFamilia(valor) {
+    return texto(valor) || "—";
+  }
+
+  /** Devolve null quando não há código: título solto não tem norma que o reja. */
+  function seloFamilia(valor) {
+    const chave = texto(valor);
+    if (!chave || !FAMILIAS_NORMATIVAS[chave]) return null;
+    return elemento("span", {
+      class: "flow-selo neutro", text: chave, title: FAMILIAS_NORMATIVAS[chave],
+    });
+  }
+
   const PAPEIS = {
     solicitante: "Solicitante",
     operador: "Operador",
@@ -663,10 +696,10 @@
   root.FlowUi = Object.freeze({
     $, $$, elemento, esc, texto,
     CLASSIFICACOES, STATUS, PAPEIS, PRIORIDADES, PRIORIDADE_PADRAO,
-    ORIGENS, PRESENCAS_EM_LD,
+    ORIGENS, PRESENCAS_EM_LD, FAMILIAS_NORMATIVAS,
     rotuloStatus, rotuloPapel, seloClassificacao, seloStatus, seloPrazo, situacaoPrazo,
     situacaoAlocacao, rotuloPrioridade, seloPrioridade, prioridadeEmDestaque,
-    rotuloOrigem, seloOrigem, rotuloPresencaEmLd,
+    rotuloOrigem, seloOrigem, rotuloPresencaEmLd, rotuloFamilia, seloFamilia,
     data, dataHora, iniciais,
     avisar, carregando, vazio, confirmar, avisoDaUrl, abrirModal, abrirPerfil,
     montarTopo, montarRodape, exigirSessao,

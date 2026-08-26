@@ -103,6 +103,10 @@
     { header: "TÍTULO NA LD", key: "official_title", width: 42, value: (r) => texto(r.official_title) },
     { header: "REFERÊNCIA", key: "reference", width: 26, value: (r) => texto(r.reference) },
     { header: "CLASSIFICAÇÃO", key: "classification", width: 25, value: (r) => CLASSIFICACAO_LEGIVEL[r.classification] || texto(r.classification) },
+    // Qual norma rege o código. Fica ao lado da classificação porque as duas
+    // dizem o que fazer com o item; vai como sigla, que é o vocabulário do
+    // controle em papel do cliente.
+    { header: "NORMA", key: "norm_family", width: 12, value: (r) => texto(r.norm_family) },
     { header: "ALOCAÇÃO", key: "allocation", width: 25, value: (r) => texto(r.allocation) },
     { header: "SITUAÇÃO DA ALOCAÇÃO", key: "allocation_status", width: 23, value: (r) => texto(r.allocation_status) },
     { header: "STATUS NO SIGEM", key: "sigem_status", width: 21, value: (r) => texto(r.sigem_status) },
