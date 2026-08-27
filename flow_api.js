@@ -1089,6 +1089,24 @@
   };
 
   const usuarios = {
+    /**
+     * Só quem pode ser responsável: perfil ativo com papel de equipe.
+     *
+     * Serve à sugestão de nomes na ficha, e é o mesmo recorte que
+     * `flow_resolve_owner_profile` usa no banco para transformar o nome
+     * escolhido em pessoa. Oferecer na tela alguém que o banco não resolveria
+     * faria a atribuição parecer feita e o aviso não ter destino.
+     */
+    async equipe() {
+      return chamar(
+        client.from("flow_profiles")
+          .select("id,full_name,email,area,role")
+          .eq("active", true)
+          .in("role", ["operador", "administrador", "proprietario"])
+          .order("full_name", { ascending: true }),
+        "listar a equipe"
+      );
+    },
     async listar() {
       return chamar(
         client.from("flow_profiles").select("*").order("full_name", { ascending: true }),

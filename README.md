@@ -41,6 +41,15 @@ Histórico completo · Exportação do Controle de Solicitações
 | `/acompanhar` | quem solicitou | Consulta pelo protocolo e lista os próprios pedidos. |
 | `/painel` | equipe de qualidade | Dashboard, triagem, distribuição, Base de LDs, tipos, usuários e acesso. |
 
+**Responsável é uma pessoa, não um nome digitado.** A ficha sugere os nomes da
+equipe ativa, e o banco resolve o nome escolhido em `owner_profile_id`, com
+chave estrangeira de verdade — é o que permite avisar quem executa. O campo
+continua aceitando texto livre, porque o responsável pode ser alguém sem conta
+no aplicativo; nesse caso a tela avisa, na hora, que **essa pessoa não receberá
+aviso**, em vez de deixar a diferença invisível. Nome que bate com duas pessoas
+da equipe não é resolvido: adivinhar qual delas seria pior do que admitir que
+não dá para saber.
+
 **Aviso é para quem executa, não para quem pede.** Por decisão do cliente, o
 solicitante não recebe notificação: ele acompanha o pedido em `/acompanhar`,
 pelo protocolo. Quem é avisado é a equipe de qualidade — quem de fato executa a

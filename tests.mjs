@@ -1021,6 +1021,80 @@ check("a tela pública consegue explicar a recusa por tamanho", () => {
     "a mensagem do cliente precisa casar com o padrão da tela pública");
 });
 
+check("o responsável passa a ser uma pessoa, não um rótulo", () => {
+  // Pré-requisito da notificação: para avisar o executor, o sistema precisa
+  // saber quem ele é. owner_id guardava auth.uid() — quem ATRIBUIU, não quem
+  // foi atribuído — e não era lido por ninguém.
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_34_responsavel_e_pessoa.sql"), "utf8"
+  );
+  assert.match(migracao, /owner_profile_id uuid references public\.flow_profiles\(id\)/,
+    "o responsável precisa de chave estrangeira de verdade");
+  assert.match(migracao, /assigned_by_id\s+uuid references public\.flow_profiles\(id\)/);
+  assert.match(migracao, /assigned_at\s+timestamptz/);
+
+  const corpo = migracao.match(
+    /create or replace function public\.flow_update_request\([\s\S]*?\n\$\$;/
+  );
+  assert.ok(corpo, "a função precisa ser recriada");
+  assert.ok(
+    !corpo[0].includes("owner_id = auth.uid()"),
+    "parar de gravar owner_id é o ponto da migração"
+  );
+  assert.match(corpo[0], /owner_profile_id = public\.flow_resolve_owner_profile\(p_value\)/);
+
+  // E o que já estava certo continua dentro da função.
+  assert.match(corpo[0], /LI\/MC da N-1710 sem o conjunto PDF \+ Excel/);
+  assert.match(corpo[0], /'solicitacao_alterada', p_field/);
+  assert.ok(!corpo[0].includes("flow_notifications"),
+    "a flow_33 tirou o aviso ao solicitante; não pode voltar");
+});
+
+check("a resolução do nome é uma consulta agregada válida", () => {
+  // Armadilha real, pega contra o banco antes de escrever: `select p.id ...
+  // having count(*) = 1` sem GROUP BY é agregada, e o Postgres recusa a coluna
+  // solta com "must appear in the GROUP BY clause". A migração inteira falharia
+  // ao ser aplicada.
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_34_responsavel_e_pessoa.sql"), "utf8"
+  );
+  const fn = migracao.match(
+    /create or replace function public\.flow_resolve_owner_profile\([\s\S]*?\n\$\$;/
+  );
+  assert.ok(fn, "a função de resolução precisa existir");
+  // Sem os comentários: o cabeçalho da função explica justamente por que HAVING
+  // não serve aqui, e a menção não pode reprovar o teste.
+  const semComentario = fn[0].replace(/--[^\n]*/g, "");
+  assert.ok(
+    !/\bhaving\b/i.test(semComentario),
+    "não use HAVING com coluna solta: a migração falha ao aplicar"
+  );
+  assert.match(fn[0], /case when count\(\*\) = 1 then \(array_agg\(p\.id\)\)\[1\] end/);
+  // Nome ambíguo devolve nulo de propósito.
+  assert.match(fn[0], /count\(\*\) = 1/,
+    "duas pessoas com o mesmo nome não podem virar uma escolha às cegas");
+  // Só quem é da equipe pode ser responsável — o mesmo recorte da tela.
+  assert.match(fn[0], /'operador', 'administrador', 'proprietario'/);
+});
+
+check("a tela oferece exatamente quem o banco consegue resolver", () => {
+  // Oferecer na sugestão alguém que o banco não resolveria faria a atribuição
+  // parecer feita e o aviso não ter destino.
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  const equipe = api.match(/async equipe\(\) \{[\s\S]*?\n    \}/);
+  assert.ok(equipe, "usuarios.equipe() precisa existir");
+  assert.match(equipe[0], /\.eq\("active", true\)/);
+  assert.match(equipe[0], /\.in\("role", \["operador", "administrador", "proprietario"\]\)/);
+
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /list: "acao-responsavel-opcoes"/,
+    "o campo precisa sugerir os nomes da equipe");
+  assert.match(painel, /não está na equipe do aplicativo e não receberá aviso/,
+    "nome fora da equipe precisa dizer que não será notificado");
+  assert.match(painel, /Api\.usuarios\.equipe\(\)/);
+});
+
+
 check("o solicitante não é notificado; a equipe continua sendo", () => {
   // Decisão do cliente: quem precisa ser avisado é o executor da atividade — a
   // equipe de qualidade —, pelo canal do Teams. O solicitante não recebe nada.

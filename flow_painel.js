@@ -62,6 +62,9 @@
     aba: "solicitacoes",
     tipos: [],
     tiposPorCodigo: new Map(),
+    // Quem pode ser responsável. Carregado uma vez: é a lista que transforma o
+    // nome digitado em pessoa de verdade, e sem ela o aviso não teria destino.
+    equipe: [],
     solicitacoes: [],
     filtros: { busca: "", tipo: "", status: "", classificacao: "", prioridade: "", origem: "", indicador: "" },
     // Protocolo junto do id: a seleção atravessa páginas e a exportação de
@@ -707,8 +710,36 @@
       status.append(node);
     });
 
-    const responsavel = elemento("input", { id: "acao-responsavel", type: "text", autocomplete: "off", placeholder: "Nome de quem executa" });
+    // Sugestão com os nomes da equipe, não uma lista fechada: o responsável
+    // pode ser alguém sem conta no aplicativo, e recusar esse caso seria pior
+    // do que registrá-lo. O que a tela não pode é deixar a diferença invisível
+    // — daí o aviso abaixo.
+    const sugestoes = elemento("datalist", { id: "acao-responsavel-opcoes" });
+    estado.equipe.forEach((pessoa) => {
+      sugestoes.append(elemento("option", { value: texto(pessoa.full_name) }));
+    });
+
+    const responsavel = elemento("input", {
+      id: "acao-responsavel", type: "text", autocomplete: "off",
+      list: "acao-responsavel-opcoes", placeholder: "Nome de quem executa",
+    });
     responsavel.value = texto(solicitacao.owner_name);
+
+    const avisoResponsavel = elemento("small", {
+      id: "acao-responsavel-aviso",
+      style: "display:block;margin-top:.25rem;color:var(--warning-800)",
+    });
+    const conferirResponsavel = () => {
+      const nome = texto(responsavel.value);
+      const daEquipe = estado.equipe.some(
+        (pessoa) => texto(pessoa.full_name).toLocaleUpperCase("pt-BR") === nome.toLocaleUpperCase("pt-BR")
+      );
+      avisoResponsavel.textContent = !nome || daEquipe
+        ? ""
+        : "Esta pessoa não está na equipe do aplicativo e não receberá aviso.";
+    };
+    responsavel.addEventListener("input", conferirResponsavel);
+    conferirResponsavel();
 
     const prioridade = elemento("select", { id: "acao-prioridade" });
     Object.entries(Ui.PRIORIDADES).forEach(([valor, info]) => {
@@ -820,7 +851,9 @@
           elemento("small", { text: "Urgente e alta destacam a linha no painel e entram no cartão de urgentes." }),
           prioridade,
         ]),
-        elemento("label", { class: "flow-campo", for: "acao-responsavel" }, [elemento("span", { text: "Responsável" }), responsavel]),
+        elemento("label", { class: "flow-campo", for: "acao-responsavel" }, [
+          elemento("span", { text: "Responsável" }), responsavel, sugestoes, avisoResponsavel,
+        ]),
         elemento("label", { class: "flow-campo", for: "acao-prazo" }, [elemento("span", { text: "Prazo" }), prazo]),
         elemento("label", { class: "flow-campo larga", for: "acao-resposta" }, [
           elemento("span", {}, [
@@ -1875,9 +1908,13 @@
   (async function iniciar() {
     const perfil = await Ui.exigirSessao({ equipe: true });
     if (!perfil) return;
-    const { data } = await Api.tipos.listar({ incluirInativos: true });
-    estado.tipos = data || [];
+    const [tipos, pessoas] = await Promise.all([
+      Api.tipos.listar({ incluirInativos: true }),
+      Api.usuarios.equipe(),
+    ]);
+    estado.tipos = tipos.data || [];
     estado.tiposPorCodigo = new Map(estado.tipos.map((tipo) => [tipo.code, tipo]));
+    estado.equipe = pessoas.data || [];
     estado.aba = abaDaUrl();
     montarPagina();
     guardarAbaNaUrl(true);
