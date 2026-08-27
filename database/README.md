@@ -28,6 +28,10 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_18_secure_request_deletion` | Exclusão permanente por administrador/proprietário, com anexos removidos pelo Storage API |
 | `flow_19_attachment_guardrails` | Limita anexos a 10 MB e cinco arquivos, fecha os formatos e expõe o consumo do Storage à equipe |
 | `flow_20_notification_inbox_controls` | Restringe a caixa ao destinatário e permite exclusão individual ou em massa das próprias notificações |
+| `flow_35_resilient_request_registration` | Registra o protocolo em lote, com idempotência, e executa a triagem por item para evitar timeout |
+| `flow_36_attachment_capacity_and_assignment_notification` | Eleva anexos a 50 MB, limita a soma a 150 MB e avisa a pessoa responsável |
+| `flow_37_owner_norm_deletion` | Exclui norma e revisões após remover os PDFs; somente proprietário |
+| `flow_38_operational_indexes` | Mantém rápidas a caixa de avisos, a busca de anexos por item e a limpeza normativa |
 
 ## Tabelas
 
@@ -42,7 +46,7 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_history` | Tudo que aconteceu, com autor, valor anterior e novo. |
 | `flow_comments` | Conversa da equipe; `internal` esconde do solicitante. |
 | `flow_attachments` | Arquivos da solicitação (bucket `flow-anexos`). |
-| `flow_notifications` | Avisos ao solicitante. |
+| `flow_notifications` | Avisos persistentes para a equipe e para a pessoa responsável. |
 | `flow_lds` | As LDs cadastradas (LD_001, LD_004, Comissionamento…). |
 | `flow_ld_versions` | Cada revisão publicada, ativa ou não. |
 | `flow_ld_documents` | Documentos indexados de cada versão. É a base das consultas. |
@@ -83,16 +87,17 @@ se alcança nem a lista de tipos.
 
 | Função | Para quê |
 | --- | --- |
-| `flow_create_request(...)` | Registra a solicitação e gera o protocolo numa operação atômica. |
-| `flow_triage_request(id)` / `flow_triage_item(id)` | Executa a triagem e grava o resultado. |
+| `flow_create_request(...)` | Registra a solicitação em lote, gera o protocolo e devolve a mesma resposta numa repetição idempotente. |
+| `flow_complete_request_triage(id)` / `flow_triage_item(id)` | Executa a triagem por item e consolida o resultado sem prender o protocolo. |
 | `flow_lookup_document(keys[])` | Todas as ocorrências do código nas LDs vigentes. |
 | `flow_search_by_title(texto)` | Candidatos por semelhança de título (`pg_trgm`). |
 | `flow_ingest_ld_documents(versao, docs)` | Grava um lote de documentos indexados. |
 | `flow_activate_ld_version(versao)` | Ativa a revisão e inativa a anterior. |
 | `flow_update_items(...)` / `flow_update_request(...)` | Alterações do painel, com histórico. |
 | `flow_delete_request(id)` | Exclui permanentemente uma solicitação; somente administrador ou proprietário. |
-| `flow_register_attachment(...)` | Registra um anexo validado e impede mais de cinco arquivos por solicitação. |
+| `flow_register_attachment(...)` | Registra anexo validado e controla formatos, quantidade e soma de 150 MB. |
 | `flow_storage_usage()` | Resume o uso total do Storage e dos anexos; somente para a equipe. |
+| `flow_prepare_norm_deletion(id)` / `flow_delete_norm(id,código)` | Calcula o impacto e exclui norma/revisões após os PDFs saírem; somente proprietário. |
 | `flow_track_protocol(protocolo)` | Acompanhamento — devolve só o que o solicitante pode ver. |
 | `flow_set_user_role(user, papel)` | Troca de papel, com as regras de quem pode; espelha na lista de acesso. |
 | `flow_acesso_para(email)` | A regra de quem entra e com que papel. Uso interno. |
@@ -136,7 +141,7 @@ prontas e faz o que sabe fazer melhor — acesso por índice.
 
 | Bucket | Conteúdo | Limite |
 | --- | --- | --- |
-| `flow-anexos` | PDF, Word e Excel das solicitações. Caminho começa pelo id da solicitação. | 10 MB por arquivo · até 5 por solicitação |
+| `flow-anexos` | PDF, Word, Excel, DWG e imagens. Caminho começa pelo id da solicitação. | 50 MB por arquivo · 150 MB no total · até 30 complementares |
 | `flow-lds` | Arquivos originais das LDs. Área interna. | 100 MB |
 | `flow-normas` | PDFs controlados das revisões normativas. Área interna. | 50 MB |
 

@@ -18,6 +18,8 @@
     /limite de \d+ anexos/i,
     /no máximo \d+ MB/i,
     /tem mais de \d+ MB/i,
+    /limite total.*\d+ MB/i,
+    /soma dos anexos.*\d+ MB/i,
     /arquivo.*vazio/i,
     /LI\/MC.*N-1710/i,
     /PDF.*Excel/i,
@@ -104,7 +106,7 @@
     return `Não foi possível enviar “${texto(arquivo && arquivo.name) || "o arquivo"}”. Tente novamente.`;
   }
 
-  async function enviarDwg(requestId, arquivo, itemId) {
+  async function enviarDwg(requestId, arquivo, itemId, aoProgresso) {
     const nomeSeguro = arquivo.name.replace(/[^\w.\- ]+/g, "_");
     const identificador = root.crypto && typeof root.crypto.randomUUID === "function"
       ? root.crypto.randomUUID()
@@ -113,6 +115,7 @@
     const mimeType = "application/octet-stream";
 
     try {
+      if (typeof aoProgresso === "function") aoProgresso({ enviados: 0, total: arquivo.size, percentual: 0 });
       const upload = await Api.client.storage.from("flow-anexos").upload(caminho, arquivo, {
         contentType: mimeType,
         upsert: false,
@@ -133,6 +136,9 @@
         await Api.client.storage.from("flow-anexos").remove([caminho]);
         return { data: null, error: mensagemPublica(registro.error, arquivo) };
       }
+      if (typeof aoProgresso === "function") {
+        aoProgresso({ enviados: arquivo.size, total: arquivo.size, percentual: 100 });
+      }
       return { data: registro.data, error: null };
     } catch (erro) {
       return { data: null, error: mensagemPublica(erro, arquivo) };
@@ -143,11 +149,13 @@
   // usuário. O painel continua usando o FlowApi original e pode diagnosticar.
   if (Api.anexos && typeof Api.anexos.enviar === "function") {
     const enviarOriginal = Api.anexos.enviar.bind(Api.anexos);
-    Api.anexos.enviar = async function enviarPublico(requestId, arquivo, itemId = null) {
+    Api.anexos.enviar = async function enviarPublico(requestId, arquivo, itemId = null, aoProgresso = null) {
       const extensao = texto(arquivo && arquivo.name).toLowerCase().split(".").pop();
-      const retorno = extensao === "dwg"
-        ? await enviarDwg(requestId, arquivo, itemId)
-        : await enviarOriginal(requestId, arquivo, itemId);
+      // Arquivo grande usa o mesmo envio retomável dos demais formatos. Para
+      // DWG pequeno mantemos o MIME binário genérico, que é o mais compatível.
+      const retorno = extensao === "dwg" && Number(arquivo && arquivo.size) <= 6 * 1024 * 1024
+        ? await enviarDwg(requestId, arquivo, itemId, aoProgresso)
+        : await enviarOriginal(requestId, arquivo, itemId, aoProgresso);
       if (retorno && retorno.error) {
         return { ...retorno, error: mensagemPublica(retorno.error, arquivo) };
       }
@@ -165,8 +173,8 @@
 
   if (Api.triagem && typeof Api.triagem.solicitacao === "function") {
     const triarOriginal = Api.triagem.solicitacao.bind(Api.triagem);
-    Api.triagem.solicitacao = async function triarPublico(id) {
-      const retorno = await triarOriginal(id);
+    Api.triagem.solicitacao = async function triarPublico(id, aoProgresso) {
+      const retorno = await triarOriginal(id, aoProgresso);
       if (retorno && retorno.error) {
         return {
           ...retorno,

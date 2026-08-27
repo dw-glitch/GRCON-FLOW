@@ -543,7 +543,8 @@ check("todo tipo de solicitação aceita até trinta anexos de documento, DWG ou
   assert.match(api, /TETO_ANEXOS = 30/);
   assert.match(api, /MAXIMO_ANEXOS = Math\.min\(TETO_ANEXOS/);
   assert.match(api, /dwg: "application\/acad"/, "o MIME do DWG precisa ser um dos aceitos pelo bucket");
-  assert.match(api, /config\.uploadMaxMb \|\| 10/);
+  assert.match(api, /MAXIMO_ANEXO_MB = Math\.min\(50/,
+    "a hospedagem não pode anunciar um limite maior que o bucket aceita");
   assert.match(api, /client\.rpc\("flow_register_attachment"/,
     "o navegador não deve inserir metadados sem as validações atômicas do banco");
   assert.match(api, /remove\(\[caminho\]\)/, "falha no registro não pode deixar arquivo órfão");
@@ -572,6 +573,19 @@ check("todo tipo de solicitação aceita até trinta anexos de documento, DWG ou
     "metadados não podem contornar o RPC validado");
   assert.doesNotMatch(migration, /delete\s+from\s+storage\.objects/i,
     "objetos do Storage nunca devem ser apagados diretamente por SQL");
+
+  const capacidade = fs.readFileSync(
+    path.join(root, "database/migrations/flow_36_attachment_capacity_and_assignment_notification.sql"), "utf8"
+  );
+  assert.match(capacidade, /file_size_limit = 52428800/,
+    "o arquivo individual deve aproveitar o teto de 50 MiB do plano Free");
+  assert.match(capacidade, /total_atual \+ new\.size_bytes > 157286400/,
+    "a soma por solicitação precisa proteger a cota compartilhada");
+  assert.match(api, /upload\/resumable/,
+    "arquivo acima de 6 MiB precisa usar envio retomável");
+  assert.match(api, /BLOCO_RESUMIVEL_BYTES = 6 \* 1024 \* 1024/);
+  assert.match(solicitar, /Api\.anexos\.limiteTotalBytes/,
+    "a tela deve barrar a soma excessiva antes de criar o protocolo");
 });
 
 check("o painel mostra o consumo total e o peso dos anexos", () => {
@@ -945,6 +959,42 @@ check("a triagem roda mesmo quando o tipo não consulta LD", () => {
   assert.match(ui, /TRIAGEM_NAO_APLICAVEL: Object\.freeze\(\{ rotulo: "Triagem não aplicável"/);
 });
 
+check("o protocolo é registrado antes da triagem pesada e pode ser retomado", () => {
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_35_resilient_request_registration.sql"), "utf8"
+  );
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  const solicitar = fs.readFileSync(path.join(root, "flow_solicitar.js"), "utf8");
+
+  assert.match(migracao, /add column if not exists client_request_id uuid/,
+    "o banco precisa reconhecer uma repetição segura do mesmo envio");
+  assert.match(migracao, /flow_requests_client_request_uidx/);
+  assert.match(migracao, /from jsonb_array_elements\(p_items\) with ordinality/,
+    "a criação de itens precisa ser set-based, não um loop com recalculo por linha");
+
+  const criacao = migracao.match(
+    /create or replace function public\.flow_create_request\([\s\S]*?\n\$\$;/
+  );
+  assert.ok(criacao, "a migração precisa recriar flow_create_request");
+  assert.doesNotMatch(criacao[0], /flow_triage_request\(nova_solicitacao\)/,
+    "a triagem não pode voltar à transação que cria o protocolo");
+  assert.match(criacao[0], /return public\.flow_request_receipt\(nova_solicitacao\)/);
+  assert.match(migracao, /after delete or update of status on public\.flow_request_items/,
+    "inserir itens não pode recalcular o pedido inteiro a cada linha");
+
+  assert.match(solicitar, /formulario\._client_request_id = estado\.clientRequestId/,
+    "o navegador precisa repetir a mesma chave quando o envio é tentado novamente");
+  assert.match(api, /client\.rpc\("flow_triage_item"/,
+    "cada item precisa ter sua própria transação recuperável");
+  assert.match(api, /client\.rpc\("flow_complete_request_triage"/,
+    "a consolidação só acontece depois que todos os itens terminam");
+  assert.doesNotMatch(
+    api.match(/async solicitacao\(id, aoProgresso\)[\s\S]*?\n    \},\n    async item/)[0],
+    /client\.rpc\("flow_triage_request"/,
+    "o navegador não pode reintroduzir a chamada monolítica que estourou o timeout"
+  );
+});
+
 // ── Urgência ───────────────────────────────────────────────────────────────
 
 check("imagem é anexo válido nos quatro portões", () => {
@@ -1017,8 +1067,59 @@ check("a tela pública consegue explicar a recusa por tamanho", () => {
     "a mensagem de tamanho precisa ser considerada segura para o solicitante");
 
   const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
-  assert.match(api, /tem mais de \$\{config\.uploadMaxMb \|\| 10\} MB/,
+  assert.match(api, /tem mais de \$\{MAXIMO_ANEXO_MB\} MB/,
     "a mensagem do cliente precisa casar com o padrão da tela pública");
+});
+
+check("atribuir uma atividade avisa automaticamente a pessoa responsável", () => {
+  const migration = fs.readFileSync(
+    path.join(root, "database/migrations/flow_36_attachment_capacity_and_assignment_notification.sql"), "utf8"
+  );
+  assert.match(migration, /after update of owner_profile_id on public\.flow_requests/i);
+  assert.match(migration, /new\.owner_profile_id is not distinct from old\.owner_profile_id/i,
+    "editar sem trocar a pessoa não pode duplicar o aviso");
+  assert.match(migration, /insert into public\.flow_notifications \(user_id, request_id, kind, title, body\)/i);
+  assert.match(migration, /new\.owner_profile_id[\s\S]*'atividade_atribuida'/i,
+    "o destinatário deve ser a pessoa atribuída, não quem atribuiu");
+
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  assert.match(painel, /Notification\.requestPermission\(\)/,
+    "a pessoa precisa poder ativar alertas do navegador por gesto explícito");
+  assert.match(painel, /new root\.Notification/);
+  assert.match(painel, /notificarNoNavegador\(notificacao\)/);
+});
+
+check("somente o proprietário exclui uma norma e a medição é atualizada", () => {
+  const migration = fs.readFileSync(
+    path.join(root, "database/migrations/flow_37_owner_norm_deletion.sql"), "utf8"
+  );
+  assert.match(migration, /not public\.flow_is_owner\(\)/i);
+  assert.match(migration, /upper\(btrim\(coalesce\(p_confirm_code/,
+    "o banco precisa repetir a confirmação pelo código exato");
+  assert.match(migration, /join storage\.objects o[\s\S]*o\.bucket_id = 'flow-normas'/i,
+    "o banco só pode apagar o cadastro depois de conferir os PDFs");
+  assert.doesNotMatch(migration, /delete\s+from\s+storage\.objects/i,
+    "a remoção física deve continuar no Storage API");
+
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  const remove = api.indexOf('client.storage.from("flow-normas").remove(caminhos)');
+  const banco = api.indexOf('client.rpc("flow_delete_norm"');
+  assert.ok(remove > -1 && banco > remove, "os PDFs precisam sair antes do cadastro");
+  assert.match(api, /dispatchEvent\(new root\.CustomEvent\("flow:storage-updated"\)\)/,
+    "a barra precisa ser recalculada imediatamente");
+
+  const normas = fs.readFileSync(path.join(root, "flow_normas.js"), "utf8");
+  assert.match(normas, /Api\.auth\.ehProprietario\(\)/);
+  assert.match(normas, /exigirTexto: norma\.code/);
+  assert.match(normas, /A barra de armazenamento será recalculada/);
+
+  const indices = fs.readFileSync(
+    path.join(root, "database/migrations/flow_38_operational_indexes.sql"), "utf8"
+  );
+  assert.match(indices, /flow_notifications_user_recent_idx/);
+  assert.match(indices, /flow_attachments_item_idx/);
+  assert.match(indices, /flow_norm_catalog_source_version_idx/,
+    "excluir uma norma não deve varrer todo o catálogo para limpar as referências");
 });
 
 check("o responsável passa a ser uma pessoa, não um rótulo", () => {

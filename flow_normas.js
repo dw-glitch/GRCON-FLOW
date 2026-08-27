@@ -37,6 +37,53 @@
     return elemento("span", { class: `flow-selo ${classe}`, text: rotulo });
   }
 
+  function tamanhoArquivo(bytes) {
+    const valor = Math.max(0, Number(bytes) || 0);
+    if (valor < 1024 * 1024) return `${Math.round(valor / 1024).toLocaleString("pt-BR")} KB`;
+    return `${(valor / (1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
+  }
+
+  async function excluirNorma(norma, botao) {
+    if (!Api.auth.ehProprietario()) return;
+    botao.disabled = true;
+    botao.textContent = "Calculando…";
+    const preparo = await Api.normas.prepararExclusao(norma.id);
+    if (preparo.error) {
+      botao.disabled = false;
+      botao.textContent = "Excluir norma";
+      avisar(preparo.error, "erro");
+      return;
+    }
+    const impacto = preparo.data || {};
+    const confirmar = await Ui.confirmar(
+      `Excluir permanentemente ${norma.code}?\n\nSerão removidas ${Number(impacto.version_count) || 0} revisão(ões) e ${Number(impacto.file_count) || 0} PDF(s), liberando aproximadamente ${tamanhoArquivo(impacto.file_bytes)} no armazenamento. Esta ação não pode ser desfeita.`,
+      {
+        titulo: "Excluir norma e PDFs",
+        rotuloConfirmar: "Excluir permanentemente",
+        rotuloCancelar: "Manter norma",
+        perigo: true,
+        exigirTexto: norma.code,
+        ajuda: "A barra de armazenamento será recalculada usando os arquivos que permanecerem no GRCON Flow.",
+      }
+    );
+    if (!confirmar) {
+      botao.disabled = false;
+      botao.textContent = "Excluir norma";
+      return;
+    }
+
+    botao.textContent = "Excluindo…";
+    const apagado = await Api.normas.excluir(norma.id, norma.code, impacto);
+    if (apagado.error) {
+      botao.disabled = false;
+      botao.textContent = "Tentar excluir novamente";
+      avisar(apagado.error, "erro");
+      return;
+    }
+    avisar(`${norma.code} e seus PDFs foram excluídos. O armazenamento foi recalculado.`, "ok");
+    await carregar();
+  }
+
   function formularioRevisao() {
     const codigo = elemento("input", { id: "norma-codigo", type: "text", placeholder: "Ex.: ET-5290.00-22000-912-1LV-001" });
     const titulo = elemento("input", { id: "norma-titulo", type: "text", placeholder: "Título controlado da norma" });
@@ -133,10 +180,16 @@
         ]),
       ]));
     });
+    const botaoExcluir = Api.auth.ehProprietario() ? elemento("button", {
+      class: "text-button danger", type: "button", text: "Excluir norma",
+      "aria-label": `Excluir permanentemente a norma ${norma.code}`,
+      onclick: (evento) => excluirNorma(norma, evento.currentTarget),
+    }) : null;
     return elemento("section", { class: "flow-card" }, [
       elemento("div", { class: "flow-card-head" }, [
         elemento("h3", { text: norma.code }),
         elemento("p", { text: norma.title }),
+        botaoExcluir ? elemento("div", { class: "flow-acoes" }, [botaoExcluir]) : null,
       ]),
       versoes.length ? itens : elemento("div", { class: "flow-vazio", text: "Nenhuma revisão cadastrada." }),
     ]);

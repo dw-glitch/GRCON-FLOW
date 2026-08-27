@@ -37,8 +37,9 @@ const config = {
   supabaseUrl: url,
   supabaseKey: key,
   // Limites conferidos também no banco e no bucket do Storage.
-  uploadMaxMb: Number(clean(process.env.FLOW_UPLOAD_MAX_MB)) || 10,
+  uploadMaxMb: Number(clean(process.env.FLOW_UPLOAD_MAX_MB)) || 50,
   uploadMaxFiles: Number(clean(process.env.FLOW_UPLOAD_MAX_FILES)) || 30,
+  uploadMaxRequestMb: Number(clean(process.env.FLOW_UPLOAD_MAX_REQUEST_MB)) || 150,
   // Cota atual do projeto Free. Se o plano mudar, basta ajustar a variável no
   // ambiente da hospedagem; o painel continuará calculando o uso real.
   storageQuotaMb: Number(clean(process.env.FLOW_STORAGE_QUOTA_MB)) || 1000,
