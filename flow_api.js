@@ -49,7 +49,10 @@
   const ACEITE_ANEXO = EXTENSOES_ANEXO.map((extensao) => `.${extensao}`).join(",");
   const TETO_ANEXOS = 30;
   const MAXIMO_ANEXOS = Math.min(TETO_ANEXOS, Math.max(1, Number(config.uploadMaxFiles) || TETO_ANEXOS));
+  const MAXIMO_ANEXO_MB = Math.min(50, Math.max(1, Number(config.uploadMaxMb) || 50));
+  const MAXIMO_TOTAL_ANEXOS_MB = Math.min(150, Math.max(1, Number(config.uploadMaxRequestMb) || 150));
   const FORMATOS_ANEXO = "PDF, Excel, Word, DWG ou imagem";
+  const BLOCO_RESUMIVEL_BYTES = 6 * 1024 * 1024;
   // Lado maior da foto reduzida. 2200 px preserva leitura de placa, etiqueta e
   // trinca — que é o que uma evidência precisa mostrar.
   const LADO_MAXIMO_IMAGEM = 2200;
@@ -74,7 +77,11 @@
   }
 
   function limiteDeBytes() {
-    return (Number(config.uploadMaxMb) || 10) * 1024 * 1024;
+    return MAXIMO_ANEXO_MB * 1024 * 1024;
+  }
+
+  function limiteTotalDeBytes() {
+    return MAXIMO_TOTAL_ANEXOS_MB * 1024 * 1024;
   }
 
   function extensaoDoAnexo(arquivo) {
@@ -92,7 +99,7 @@
     // desistir. Dizer "passou do tamanho" para um arquivo que o sistema
     // consegue enviar seria recusar o que ele aceita.
     if (!ehImagem(arquivo) && arquivo.size > limiteDeBytes()) {
-      return `“${arquivo.name}” tem mais de ${config.uploadMaxMb || 10} MB.`;
+      return `“${arquivo.name}” tem mais de ${MAXIMO_ANEXO_MB} MB.`;
     }
     return null;
   }
@@ -150,7 +157,7 @@
     }
     return {
       arquivo: null,
-      error: `“${arquivo.name}” tem mais de ${config.uploadMaxMb || 10} MB.`,
+      error: `“${arquivo.name}” tem mais de ${MAXIMO_ANEXO_MB} MB.`,
     };
   }
 
@@ -167,6 +174,9 @@
     if (/Email not confirmed/i.test(bruto)) return "Confirme seu e-mail antes de entrar.";
     if (/User already registered/i.test(bruto)) return "Este e-mail já tem cadastro. Faça login.";
     if (/Password should be at least/i.test(bruto)) return "A senha precisa ter pelo menos 6 caracteres.";
+    if (/canceling statement due to statement timeout|statement timeout/i.test(bruto)) {
+      return "O servidor levou mais tempo que o permitido. O protocolo, quando já exibido, continua salvo; tente novamente somente a etapa pendente.";
+    }
     if (/LI\/MC.*N-1710|PDF e o Excel|PDF \+ Excel|PDF obrigatório|Excel obrigatório/i.test(bruto)) return bruto;
     if (/Limite de \d+ anexos complementares/i.test(bruto)) {
       return `Esta solicitação já tem o limite de ${MAXIMO_ANEXOS} anexos complementares.`;
@@ -178,7 +188,10 @@
       return `Envie somente arquivos ${FORMATOS_ANEXO}.`;
     }
     if (/flow_attachments_size_valid|maximum allowed size|mais de \d+ MB/i.test(bruto)) {
-      return `Cada anexo pode ter no máximo ${config.uploadMaxMb || 10} MB.`;
+      return `Cada anexo pode ter no máximo ${MAXIMO_ANEXO_MB} MB.`;
+    }
+    if (/limite total de 150 MB|ultrapassam o limite total/i.test(bruto)) {
+      return `A soma dos anexos desta solicitação pode ter no máximo ${MAXIMO_TOTAL_ANEXOS_MB} MB.`;
     }
     if (/row-level security|permission denied|Sem permissão/i.test(bruto)) {
       return bruto.includes("Sem permissão") ? bruto : "Seu perfil não tem permissão para esta ação.";
@@ -401,10 +414,10 @@
   // Solicitações
   // ---------------------------------------------------------------------------
 
-  // O banco já tria no ato da criação (`flow_create_request` devolve
-  // `triage_completed`). A tela pede a triagem logo em seguida, por hábito do
-  // fluxo antigo; guardamos o id para pular só essa repetição imediata.
-  // Reprocessamento manual pelo painel continua executando sempre.
+  // Um recibo idempotente pode ser recuperado depois de a triagem já ter sido
+  // concluída. Guardamos apenas esse caso para não repetir a etapa imediatamente.
+  // Na criação normal `triage_completed` é falso: registrar o protocolo e triar
+  // as LDs são transações separadas desde a flow_35.
   const triadasNoServidor = new Set();
 
   // Teto da exportação. Alto porque são só protocolos, e ainda assim finito:
@@ -709,13 +722,51 @@
   };
 
   const triagem = {
-    /** Tria a solicitação inteira. Chamada logo após o envio. */
-    async solicitacao(id) {
+    /**
+     * Tria a solicitação item a item.
+     *
+     * Cada item é uma transação independente. Uma lista grande pode levar mais
+     * tempo, mas nunca volta a colocar o protocolo inteiro sob o timeout de uma
+     * única chamada. `aoProgresso` é opcional e mantém a tela responsiva.
+     */
+    async solicitacao(id, aoProgresso) {
       if (triadasNoServidor.has(id)) {
         triadasNoServidor.delete(id);
         return { data: { already_triaged: true }, error: null };
       }
-      return chamar(client.rpc("flow_triage_request", { target_request: id }), "executar triagem");
+
+      const lista = await chamar(
+        client.from("flow_request_items").select("id,item_number")
+          .eq("request_id", id).order("item_number", { ascending: true }),
+        "preparar triagem"
+      );
+      if (lista.error) return lista;
+
+      const itens = lista.data || [];
+      const resumo = {};
+      for (let indice = 0; indice < itens.length; indice += 1) {
+        const retorno = await chamar(
+          client.rpc("flow_triage_item", { target_item: itens[indice].id }),
+          `triar item ${indice + 1} de ${itens.length}`
+        );
+        if (retorno.error) {
+          return {
+            data: { items: indice, total: itens.length, summary: resumo, partial: true },
+            error: retorno.error,
+          };
+        }
+        const classificacao = texto(retorno.data && retorno.data.classification) || "SEM_CLASSIFICACAO";
+        resumo[classificacao] = (resumo[classificacao] || 0) + 1;
+        if (typeof aoProgresso === "function") {
+          try { aoProgresso({ atual: indice + 1, total: itens.length, classificacao }); }
+          catch (erro) { console.error("[GRCON Flow · progresso da triagem]", erro); }
+        }
+      }
+
+      return chamar(
+        client.rpc("flow_complete_request_triage", { target_request: id }),
+        "concluir triagem"
+      );
     },
     async item(id) {
       return chamar(client.rpc("flow_triage_item", { target_item: id }), "triar item");
@@ -891,6 +942,46 @@
       return chamar(client.rpc("flow_activate_norm_version", { target_version: id }), "ativar norma");
     },
 
+    async prepararExclusao(id) {
+      if (!auth.ehProprietario()) {
+        return { data: null, error: "Somente o proprietário pode excluir uma norma." };
+      }
+      return chamar(
+        client.rpc("flow_prepare_norm_deletion", { target_norm: id }),
+        "preparar exclusão da norma"
+      );
+    },
+
+    async excluir(id, codigoConfirmado, preparoExistente = null) {
+      if (!auth.ehProprietario()) {
+        return { data: null, error: "Somente o proprietário pode excluir uma norma." };
+      }
+      const preparo = preparoExistente
+        ? { data: preparoExistente, error: null }
+        : await normas.prepararExclusao(id);
+      if (preparo.error) return preparo;
+
+      const caminhos = Array.isArray(preparo.data && preparo.data.storage_paths)
+        ? preparo.data.storage_paths.filter(Boolean) : [];
+      if (texto(codigoConfirmado).toUpperCase() !== texto(preparo.data && preparo.data.code).toUpperCase()) {
+        return { data: null, error: "Digite o código exato da norma para confirmar a exclusão." };
+      }
+      if (caminhos.length) {
+        const removido = await chamar(
+          client.storage.from("flow-normas").remove(caminhos),
+          "remover PDFs da norma"
+        );
+        if (removido.error) return { data: null, error: removido.error };
+      }
+
+      const apagado = await chamar(client.rpc("flow_delete_norm", {
+        target_norm: id,
+        p_confirm_code: texto(codigoConfirmado),
+      }), "excluir norma");
+      if (!apagado.error) armazenamento.sinalizarMudanca();
+      return apagado;
+    },
+
     async salvarCodigo(catalogo, codigo, rotulo, ativo = true) {
       return chamar(client.rpc("flow_save_catalog_entry", {
         p_catalog_code: texto(catalogo).toUpperCase(),
@@ -934,17 +1025,125 @@
     },
   };
 
+  function base64Metadata(valor) {
+    const bytes = new root.TextEncoder().encode(texto(valor));
+    let binario = "";
+    bytes.forEach((byte) => { binario += String.fromCharCode(byte); });
+    return root.btoa(binario);
+  }
+
+  function aguardarUpload(ms) {
+    return new Promise((resolver) => root.setTimeout(resolver, ms));
+  }
+
+  async function enviarAnexoResumivel(caminho, arquivo, mimeType, aoProgresso) {
+    const sessao = await client.auth.getSession();
+    const token = sessao.data && sessao.data.session && sessao.data.session.access_token;
+    if (!token) throw new Error("Sua sessão expirou. Entre novamente antes de enviar o arquivo.");
+
+    const projeto = new URL(config.supabaseUrl).hostname.split(".")[0];
+    const endpoint = `https://${projeto}.storage.supabase.co/storage/v1/upload/resumable`;
+    const comuns = {
+      Authorization: `Bearer ${token}`,
+      apikey: config.supabaseKey,
+      "Tus-Resumable": "1.0.0",
+    };
+    const criado = await root.fetch(endpoint, {
+      method: "POST",
+      headers: {
+        ...comuns,
+        "Upload-Length": String(arquivo.size),
+        "Upload-Metadata": [
+          `bucketName ${base64Metadata("flow-anexos")}`,
+          `objectName ${base64Metadata(caminho)}`,
+          `contentType ${base64Metadata(mimeType)}`,
+          `cacheControl ${base64Metadata("3600")}`,
+        ].join(","),
+        "x-upsert": "false",
+      },
+    });
+    if (!criado.ok) throw new Error((await criado.text()) || `Falha ao iniciar o envio (${criado.status}).`);
+    const local = criado.headers.get("Location");
+    if (!local) throw new Error("O servidor não devolveu o endereço do envio retomável.");
+    const uploadUrl = new URL(local, endpoint).toString();
+
+    let enviados = 0;
+    const esperas = [0, 1000, 3000, 5000, 10000];
+    while (enviados < arquivo.size) {
+      const fim = Math.min(arquivo.size, enviados + BLOCO_RESUMIVEL_BYTES);
+      let concluido = false;
+      let ultimoErro = null;
+      for (const espera of esperas) {
+        if (espera) await aguardarUpload(espera);
+        try {
+          const resposta = await root.fetch(uploadUrl, {
+            method: "PATCH",
+            headers: {
+              ...comuns,
+              "Content-Type": "application/offset+octet-stream",
+              "Upload-Offset": String(enviados),
+            },
+            body: arquivo.slice(enviados, fim),
+          });
+          if (!resposta.ok) throw new Error((await resposta.text()) || `Falha no envio (${resposta.status}).`);
+          enviados = Number(resposta.headers.get("Upload-Offset")) || fim;
+          concluido = true;
+          if (typeof aoProgresso === "function") {
+            aoProgresso({ enviados, total: arquivo.size, percentual: Math.round((enviados / arquivo.size) * 100) });
+          }
+          break;
+        } catch (erro) {
+          ultimoErro = erro;
+          // Confere quanto o servidor recebeu antes de repetir o bloco. Isso
+          // evita duplicar bytes quando a resposta se perdeu após um PATCH aceito.
+          try {
+            const cabeca = await root.fetch(uploadUrl, { method: "HEAD", headers: comuns });
+            if (cabeca.ok) enviados = Number(cabeca.headers.get("Upload-Offset")) || enviados;
+            if (enviados >= fim) { concluido = true; break; }
+          } catch (_) { /* a próxima tentativa mantém o último offset conhecido */ }
+        }
+      }
+      if (!concluido) throw ultimoErro || new Error("Não foi possível concluir o envio retomável.");
+    }
+  }
+
+  async function guardarObjetoAnexo(caminho, arquivo, mimeType, aoProgresso) {
+    if (arquivo.size > BLOCO_RESUMIVEL_BYTES) {
+      try {
+        await enviarAnexoResumivel(caminho, arquivo, mimeType, aoProgresso);
+        return { data: { path: caminho }, error: null };
+      } catch (erro) {
+        return { data: null, error: traduzErro(erro, "enviar anexo retomável") };
+      }
+    }
+    if (typeof aoProgresso === "function") aoProgresso({ enviados: 0, total: arquivo.size, percentual: 0 });
+    const retorno = await chamar(
+      client.storage.from("flow-anexos").upload(caminho, arquivo, {
+        contentType: mimeType,
+        upsert: false,
+      }),
+      "enviar anexo"
+    );
+    if (!retorno.error && typeof aoProgresso === "function") {
+      aoProgresso({ enviados: arquivo.size, total: arquivo.size, percentual: 100 });
+    }
+    return retorno;
+  }
+
   const anexos = {
     extensoes: EXTENSOES_ANEXO,
     accept: ACEITE_ANEXO,
     maximo: MAXIMO_ANEXOS,
+    maximoMb: MAXIMO_ANEXO_MB,
+    maximoTotalMb: MAXIMO_TOTAL_ANEXOS_MB,
+    limiteTotalBytes: limiteTotalDeBytes(),
     formatos: FORMATOS_ANEXO,
     extensoes: EXTENSOES_ANEXO,
     imagens: EXTENSOES_IMAGEM,
     validar: validarAnexo,
     preparar: prepararAnexo,
 
-    async enviar(requestId, arquivoOriginal, itemId = null) {
+    async enviar(requestId, arquivoOriginal, itemId = null, aoProgresso = null) {
       const preparado = await prepararAnexo(arquivoOriginal);
       if (preparado.error) return { data: null, error: preparado.error };
       const arquivo = preparado.arquivo;
@@ -953,14 +1152,13 @@
         ? root.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const caminho = `${requestId}/${identificador}-${nomeSeguro}`;
       const mimeType = MIME_ANEXO[extensaoDoAnexo(arquivo)];
-      const { error } = await chamar(
-        client.storage.from("flow-anexos").upload(caminho, arquivo, {
-          contentType: mimeType,
-          upsert: false,
-        }),
-        "enviar anexo"
-      );
-      if (error) return { error };
+      const { error } = await guardarObjetoAnexo(caminho, arquivo, mimeType, aoProgresso);
+      if (error) {
+        // Um envio retomável interrompido pode já ter criado o objeto. Remover
+        // pelo caminho é idempotente e impede que uma tentativa falha consuma cota.
+        await client.storage.from("flow-anexos").remove([caminho]);
+        return { error };
+      }
       const registro = await chamar(
         client.rpc("flow_register_attachment", {
           p_request_id: requestId,
@@ -1004,12 +1202,20 @@
     observar(fn) {
       if (!state.session || !auth.ehProprietario() || typeof fn !== "function") return () => {};
       const sufixo = state.session.user.id || Math.random().toString(36).slice(2);
+      const aoMudarLocalmente = () => fn({ eventType: "LOCAL_STORAGE_CHANGE" });
+      root.addEventListener("flow:storage-updated", aoMudarLocalmente);
       const canal = client.channel(`flow-armazenamento-${sufixo}`)
         .on("postgres_changes", { event: "*", schema: "public", table: "flow_attachments" }, fn)
         .on("postgres_changes", { event: "*", schema: "public", table: "flow_ld_versions" }, fn)
         .on("postgres_changes", { event: "*", schema: "public", table: "flow_norm_versions" }, fn)
         .subscribe();
-      return () => { client.removeChannel(canal); };
+      return () => {
+        root.removeEventListener("flow:storage-updated", aoMudarLocalmente);
+        client.removeChannel(canal);
+      };
+    },
+    sinalizarMudanca() {
+      root.dispatchEvent(new root.CustomEvent("flow:storage-updated"));
     },
   };
 

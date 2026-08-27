@@ -33,6 +33,7 @@
     formulario: {},
     urgente: false,
     enviando: false,
+    clientRequestId: null,
   };
 
   const ICONES = {
@@ -91,6 +92,7 @@
           estado.documentos = [];
           estado.anexos = [];
           estado.paresN1710 = {};
+          estado.clientRequestId = null;
           estado.etapa = 2;
           render();
         },
@@ -196,6 +198,12 @@
     }
     const par = parN1710(item);
     if (!par) return;
+    const atual = par[formato];
+    const totalDepois = totalBytesSelecionados() - (Number(atual && atual.size) || 0) + Number(arquivo.size);
+    if (totalDepois > Api.anexos.limiteTotalBytes) {
+      avisar(`A soma de todos os anexos pode ter no máximo ${Api.anexos.maximoTotalMb} MB.`, "erro");
+      return;
+    }
     par[formato] = arquivo;
     render();
   }
@@ -335,8 +343,19 @@
 
   function tamanhoArquivo(bytes) {
     const tamanho = Number(bytes) || 0;
+    if (tamanho <= 0) return "0 KB";
     if (tamanho < 1024 * 1024) return `${Math.max(1, Math.round(tamanho / 1024))} KB`;
     return `${(tamanho / (1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
+  }
+
+  function arquivosSelecionados() {
+    const obrigatorios = Object.values(estado.paresN1710 || {}).flatMap((par) =>
+      [par && par.pdf, par && par.excel].filter(Boolean));
+    return estado.anexos.concat(obrigatorios);
+  }
+
+  function totalBytesSelecionados() {
+    return arquivosSelecionados().reduce((total, arquivo) => total + (Number(arquivo.size) || 0), 0);
   }
 
   /** Anexos são independentes dos códigos e ficam disponíveis em todo pedido. */
@@ -363,7 +382,7 @@
     }, [
       icone("upload"),
       elemento("strong", { text: limiteAtingido ? "Limite de anexos atingido" : "Arraste os anexos aqui" }),
-      elemento("span", { text: `${Api.anexos.formatos} · até ${maximo} arquivos · ${Api.config.uploadMaxMb || 10} MB cada.` }),
+      elemento("span", { text: `${Api.anexos.formatos} · até ${maximo} arquivos complementares · ${Api.anexos.maximoMb} MB cada · ${Api.anexos.maximoTotalMb} MB no pedido.` }),
       entradaArquivos,
     ]);
 
@@ -403,6 +422,7 @@
         elemento("p", { text: temParN1710
           ? `${estado.anexos.length} de ${maximo} complementares selecionados. O PDF + Excel de LI/MC é enviado no próprio item acima.`
           : `${estado.anexos.length} de ${maximo} arquivos selecionados.` }),
+        elemento("p", { text: `${tamanhoArquivo(totalBytesSelecionados())} de ${Api.anexos.maximoTotalMb} MB selecionados no total.` }),
       ]),
       area,
       estado.anexos.length ? lista : null,
@@ -424,6 +444,11 @@
       else if (existentes.has(chave)) erros.push(`“${arquivo.name}” já foi anexado.`);
       else if (estado.anexos.length + aceitos.length >= maximo) {
         erros.push(`O limite é de ${maximo} anexos por solicitação; “${arquivo.name}” não foi incluído.`);
+      }
+      else if (totalBytesSelecionados()
+        + aceitos.reduce((total, item) => total + (Number(item.size) || 0), 0)
+        + Number(arquivo.size) > Api.anexos.limiteTotalBytes) {
+        erros.push(`O limite total é de ${Api.anexos.maximoTotalMb} MB por solicitação; “${arquivo.name}” não foi incluído.`);
       }
       else { existentes.add(chave); aceitos.push(arquivo); }
     });
@@ -812,7 +837,10 @@
         andamento.replaceChildren();
         andamento.textContent = `Enviando ${indice + 1} de ${entradas.length}: ${entrada.rotulo || arquivo.name}`;
       }
-      const retorno = await Api.anexos.enviar(requestId, arquivo, entrada.itemId || null);
+      const retorno = await Api.anexos.enviar(requestId, arquivo, entrada.itemId || null, ({ percentual }) => {
+        if (!andamento) return;
+        andamento.textContent = `Enviando ${indice + 1} de ${entradas.length}: ${entrada.rotulo || arquivo.name} · ${percentual}%`;
+      });
       if (retorno.error) resultado.falhas.push({ ...entrada, erro: retorno.error });
       else resultado.enviados.push(entrada);
     }
@@ -856,12 +884,30 @@
     const botao = document.getElementById("sol-enviar");
     if (botao) { botao.disabled = true; botao.textContent = "Registrando…"; }
 
+    if (totalBytesSelecionados() > Api.anexos.limiteTotalBytes) {
+      estado.enviando = false;
+      if (botao) { botao.disabled = false; botao.textContent = "Enviar solicitação"; }
+      avisar(`A soma de todos os anexos pode ter no máximo ${Api.anexos.maximoTotalMb} MB.`, "erro");
+      return;
+    }
+
     const formulario = {};
     (estado.tipo.campos || []).forEach((campo) => {
       const valor = estado.formulario[campo.field_key];
       if (valor !== undefined && valor !== "") formulario[campo.field_key] = valor;
     });
     if (texto(estado.formulario._observacao)) formulario.observacoes = texto(estado.formulario._observacao);
+    // A mesma chave permanece enquanto a pessoa repete um envio que falhou.
+    // O banco devolve o protocolo já criado em vez de duplicá-lo.
+    if (!estado.clientRequestId) {
+      estado.clientRequestId = root.crypto && typeof root.crypto.randomUUID === "function"
+        ? root.crypto.randomUUID()
+        : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (caractere) => {
+          const aleatorio = Math.floor(Math.random() * 16);
+          return (caractere === "x" ? aleatorio : (aleatorio & 0x3) | 0x8).toString(16);
+        });
+    }
+    formulario._client_request_id = estado.clientRequestId;
 
     const { data, error } = await Api.solicitacoes.criar({
       tipo: estado.tipo.code,
@@ -909,9 +955,10 @@
       ? await enviarAnexos(data.id, arquivos)
       : { enviados: [], falhas: [] };
     if (arquivos.length) mostrarResultadoAnexos(data.id, resultadoAnexos);
-    const triagem = data.uses_ld
-      ? await Api.triagem.solicitacao(data.id)
-      : { data: null, error: null };
+    const triagem = await Api.triagem.solicitacao(data.id, ({ atual, total }) => {
+      const andamento = document.getElementById("sol-pos-envio");
+      if (andamento) andamento.textContent = `Conferindo documentos nas LDs: ${atual} de ${total}…`;
+    });
 
     const aviso = document.getElementById("sol-pos-envio");
     if (aviso) {
@@ -949,7 +996,7 @@
             onclick: () => {
               estado.tipo = null; estado.etapa = 1;
               estado.documentos = []; estado.anexos = []; estado.paresN1710 = {};
-              estado.formulario = {}; estado.urgente = false;
+              estado.formulario = {}; estado.urgente = false; estado.clientRequestId = null;
               render();
             },
           }),

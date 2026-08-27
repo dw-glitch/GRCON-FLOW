@@ -3,8 +3,9 @@ window.FLOW_CONFIG = Object.freeze({
   "appName": "GRCON Flow",
   "supabaseUrl": "https://hbfcqkbjrcmpdljlklol.supabase.co",
   "supabaseKey": "sb_publishable_dxFhAsqOMcLUvYCtjQ_HTg_aG0qCkI0",
-  "uploadMaxMb": 10,
+  "uploadMaxMb": 50,
   "uploadMaxFiles": 30,
+  "uploadMaxRequestMb": 150,
   "storageQuotaMb": 1000,
   "databaseQuotaMb": 500,
   "ldUploadMaxMb": 100

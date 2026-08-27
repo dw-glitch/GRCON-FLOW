@@ -1539,6 +1539,41 @@
     });
   }
 
+  function podeAtivarAlertasNavegador() {
+    return root.isSecureContext && "Notification" in root
+      && root.Notification.permission === "default";
+  }
+
+  async function ativarAlertasNavegador() {
+    if (!("Notification" in root)) return;
+    const permissao = await root.Notification.requestPermission();
+    desenharNotificacoes();
+    avisar(permissao === "granted"
+      ? "Alertas deste navegador ativados."
+      : "O navegador não autorizou os alertas; eles continuam disponíveis nesta central.",
+    permissao === "granted" ? "ok" : "atencao");
+  }
+
+  function notificarNoNavegador(notificacao) {
+    if (!("Notification" in root) || root.Notification.permission !== "granted") return;
+    try {
+      const alerta = new root.Notification(texto(notificacao.title) || "Nova atividade no GRCON Flow", {
+        body: texto(notificacao.body) || "Abra o painel para consultar.",
+        tag: `grcon-flow-${notificacao.request_id || notificacao.id}`,
+        icon: "grcon-logo-app.png",
+      });
+      alerta.onclick = () => {
+        root.focus();
+        abrirNotificacao(notificacao);
+        alerta.close();
+      };
+    } catch (erro) {
+      // Alguns navegadores móveis exigem service worker para alertas nativos.
+      // O aviso persistente na central continua sendo a fonte confiável.
+      console.error("[GRCON Flow · alerta do navegador]", erro);
+    }
+  }
+
   function desenharNotificacoes() {
     const botao = document.getElementById("painel-notificacoes-botao");
     const menu = document.getElementById("painel-notificacoes-menu");
@@ -1565,6 +1600,12 @@
     const bloqueada = estado.notificacoesMarcando || estado.notificacoesExcluindoTodas
       || Boolean(estado.notificacaoExcluindoId);
     const acoesCabecalho = [];
+    if (podeAtivarAlertasNavegador()) {
+      acoesCabecalho.push(elemento("button", {
+        class: "text-button compact", type: "button", text: "Ativar alertas",
+        onclick: ativarAlertasNavegador,
+      }));
+    }
     if (total) {
       acoesCabecalho.push(elemento("button", {
         class: "text-button compact", type: "button",
@@ -1927,6 +1968,7 @@
     });
     const pararNotificacoes = Api.notificacoes.assinar((notificacao) => {
       avisar(texto(notificacao.title) || "Nova solicitação recebida.", "ok");
+      notificarNoNavegador(notificacao);
       if (!estado.notificacoes.some((item) => item.id === notificacao.id)) {
         estado.notificacoes.unshift(notificacao);
         estado.notificacoes = estado.notificacoes.slice(0, 50);

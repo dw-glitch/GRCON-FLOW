@@ -119,10 +119,11 @@ versão de LD que usou. A análise anterior permanece.
 
 **Anexos ficam privados.** Todo tipo de solicitação aceita até 30 arquivos em
 PDF, Excel (`.xls`, `.xlsx`, `.xlsm`), Word (`.doc`, `.docx`), DWG e imagem
-(`.jpg`, `.jpeg`, `.png`, `.webp`, `.heic`, `.heif`), com até 10 MB por
-arquivo. O solicitante vê o resultado de cada envio e pode tentar novamente se
-algum falhar. A equipe baixa o arquivo original na ficha da solicitação por um
-link temporário; o bucket não é público.
+(`.jpg`, `.jpeg`, `.png`, `.webp`, `.heic`, `.heif`), com até **50 MB por
+arquivo e 150 MB na soma de uma solicitação**. Arquivos acima de 6 MB usam
+envio retomável, que continua do ponto recebido quando a conexão oscila. O
+solicitante vê o progresso e pode tentar novamente se algum falhar. A equipe
+baixa o original na ficha por um link temporário; o bucket não é público.
 
 **Foto grande é reduzida, não recusada.** Quando uma imagem passa do limite, o
 navegador a redimensiona para 2200 px no maior lado e reenvia como JPEG. A
@@ -416,8 +417,9 @@ da configuração do GRCON principal na hospedagem.
 | --- | --- |
 | `FLOW_SUPABASE_URL` | Apontar para outro projeto (homologação, por exemplo). |
 | `FLOW_SUPABASE_ANON_KEY` | A chave **publicável** do projeto. |
-| `FLOW_UPLOAD_MAX_MB` | Tamanho máximo de cada anexo (padrão 10). Imagem acima disso é reduzida no navegador em vez de recusada. |
+| `FLOW_UPLOAD_MAX_MB` | Tamanho máximo de cada anexo (padrão 50). Imagem acima disso é reduzida no navegador em vez de recusada. |
 | `FLOW_UPLOAD_MAX_FILES` | Quantidade máxima de anexos por solicitação (padrão 30, o mesmo teto do banco). |
+| `FLOW_UPLOAD_MAX_REQUEST_MB` | Soma máxima dos anexos de uma solicitação (padrão 150). |
 | `FLOW_STORAGE_QUOTA_MB` | Cota usada pela barra do painel (padrão 1024 MB no plano Free). |
 | `FLOW_LD_UPLOAD_MAX_MB` | Tamanho máximo do arquivo de LD (padrão 100). |
 
