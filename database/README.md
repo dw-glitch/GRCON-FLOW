@@ -32,6 +32,8 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_36_attachment_capacity_and_assignment_notification` | Eleva anexos a 50 MB, limita a soma a 150 MB e avisa a pessoa responsável |
 | `flow_37_owner_norm_deletion` | Exclui norma e revisões após remover os PDFs; somente proprietário |
 | `flow_38_operational_indexes` | Mantém rápidas a caixa de avisos, a busca de anexos por item e a limpeza normativa |
+| `flow_39_teams_assignment_notification` | Envia ao Teams, de forma assíncrona, o aviso de atribuição do responsável |
+| `flow_40_staff_quick_registration` | Permite registro compacto em nome do solicitante somente para a equipe da Qualidade |
 
 ## Tabelas
 
@@ -88,6 +90,7 @@ se alcança nem a lista de tipos.
 | Função | Para quê |
 | --- | --- |
 | `flow_create_request(...)` | Registra a solicitação em lote, gera o protocolo e devolve a mesma resposta numa repetição idempotente. |
+| `flow_create_staff_request(...)` | Entrada compacta exclusiva da Qualidade; preserva solicitante, autor do lançamento e idempotência. |
 | `flow_complete_request_triage(id)` / `flow_triage_item(id)` | Executa a triagem por item e consolida o resultado sem prender o protocolo. |
 | `flow_lookup_document(keys[])` | Todas as ocorrências do código nas LDs vigentes. |
 | `flow_search_by_title(texto)` | Candidatos por semelhança de título (`pg_trgm`). |
