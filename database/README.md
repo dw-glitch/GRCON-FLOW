@@ -34,6 +34,8 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_38_operational_indexes` | Mantém rápidas a caixa de avisos, a busca de anexos por item e a limpeza normativa |
 | `flow_39_teams_assignment_notification` | Envia ao Teams, de forma assíncrona, o aviso de atribuição do responsável |
 | `flow_40_staff_quick_registration` | Permite registro compacto em nome do solicitante somente para a equipe da Qualidade |
+| `flow_41_quick_registration_phase_2` | Adiciona colagem inteligente local e favoritos pessoais protegidos por RLS |
+| `flow_42_quick_template_type_index` | Indexa a relação entre favoritos e tipos para manter operações rápidas |
 
 ## Tabelas
 
@@ -49,6 +51,7 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_comments` | Conversa da equipe; `internal` esconde do solicitante. |
 | `flow_attachments` | Arquivos da solicitação (bucket `flow-anexos`). |
 | `flow_notifications` | Avisos persistentes para a equipe e para a pessoa responsável. |
+| `flow_quick_templates` | Modelos pessoais e pequenos do Registro rápido; nunca guarda solicitante, contato, código ou anexo. |
 | `flow_lds` | As LDs cadastradas (LD_001, LD_004, Comissionamento…). |
 | `flow_ld_versions` | Cada revisão publicada, ativa ou não. |
 | `flow_ld_documents` | Documentos indexados de cada versão. É a base das consultas. |
