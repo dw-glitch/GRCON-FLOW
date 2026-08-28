@@ -177,6 +177,15 @@
     if (/canceling statement due to statement timeout|statement timeout/i.test(bruto)) {
       return "O servidor levou mais tempo que o permitido. O protocolo, quando já exibido, continua salvo; tente novamente somente a etapa pendente.";
     }
+    if (/responsável foi alterado por outro administrador|could not serialize access/i.test(bruto)) {
+      return "O responsável mudou em outra sessão. Reabra a solicitação e confira o valor atual antes de salvar novamente.";
+    }
+    if (/Somente administradores podem definir o responsável|seleção administrativa de responsável/i.test(bruto)) {
+      return "Somente administradores podem definir ou alterar o responsável.";
+    }
+    if (/Selecione um usuário ativo da equipe como responsável|não possui nome cadastrado/i.test(bruto)) {
+      return "Selecione um usuário ativo da equipe como responsável.";
+    }
     if (/flow_quick_templates_owner_name_uidx|duplicate key.*flow_quick_templates/i.test(bruto)) {
       return "Já existe um favorito com esse nome.";
     }
@@ -678,6 +687,20 @@
           p_request_id: id, p_field: campo, p_value: texto(valor), p_note: texto(nota),
         }),
         "atualizar solicitação"
+      );
+    },
+
+    async definirResponsavel(id, ownerProfileId, expectedOwnerProfileId) {
+      if (!auth.ehAdmin()) {
+        return { data: null, error: "Somente administradores podem definir ou alterar o responsável." };
+      }
+      return chamar(
+        client.rpc("flow_set_request_owner", {
+          p_request_id: id,
+          p_owner_profile_id: ownerProfileId || null,
+          p_expected_owner_profile_id: expectedOwnerProfileId || null,
+        }),
+        "definir responsável"
       );
     },
 

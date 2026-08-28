@@ -36,6 +36,7 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_40_staff_quick_registration` | Permite registro compacto em nome do solicitante somente para a equipe da Qualidade |
 | `flow_41_quick_registration_phase_2` | Adiciona colagem inteligente local e favoritos pessoais protegidos por RLS |
 | `flow_42_quick_template_type_index` | Indexa a relação entre favoritos e tipos para manter operações rápidas |
+| `flow_45_admin_request_owner` | Restringe responsável a perfis ativos da equipe, exclusivo da administração, com concorrência e histórico |
 
 ## Tabelas
 
@@ -100,6 +101,7 @@ se alcança nem a lista de tipos.
 | `flow_ingest_ld_documents(versao, docs)` | Grava um lote de documentos indexados. |
 | `flow_activate_ld_version(versao)` | Ativa a revisão e inativa a anterior. |
 | `flow_update_items(...)` / `flow_update_request(...)` | Alterações do painel, com histórico. |
+| `flow_set_request_owner(...)` | Define ou troca o responsável por UUID; somente administrador/proprietário e sem sobrescrever alteração concorrente. |
 | `flow_delete_request(id)` | Exclui permanentemente uma solicitação; somente administrador ou proprietário. |
 | `flow_register_attachment(...)` | Registra anexo validado e controla formatos, quantidade e soma de 150 MB. |
 | `flow_storage_usage()` | Resume o uso total do Storage e dos anexos; somente para a equipe. |

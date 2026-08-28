@@ -1312,9 +1312,7 @@ check("a resolução do nome é uma consulta agregada válida", () => {
   assert.match(fn[0], /'operador', 'administrador', 'proprietario'/);
 });
 
-check("a tela oferece exatamente quem o banco consegue resolver", () => {
-  // Oferecer na sugestão alguém que o banco não resolveria faria a atribuição
-  // parecer feita e o aviso não ter destino.
+check("a tela oferece exatamente os perfis que o banco aceita como responsável", () => {
   const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
   const equipe = api.match(/async equipe\(\) \{[\s\S]*?\n    \}/);
   assert.ok(equipe, "usuarios.equipe() precisa existir");
@@ -1322,11 +1320,57 @@ check("a tela oferece exatamente quem o banco consegue resolver", () => {
   assert.match(equipe[0], /\.in\("role", \["operador", "administrador", "proprietario"\]\)/);
 
   const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
-  assert.match(painel, /list: "acao-responsavel-opcoes"/,
-    "o campo precisa sugerir os nomes da equipe");
-  assert.match(painel, /não está na equipe do aplicativo e não receberá aviso/,
-    "nome fora da equipe precisa dizer que não será notificado");
+  assert.match(painel, /value: pessoa\.id/,
+    "a seleção precisa enviar o UUID, não um nome livre");
+  assert.match(painel, /Somente pessoas ativas da equipe podem ser selecionadas/);
+  assert.match(painel, /Api\.auth\.ehAdmin\(\)/,
+    "o seletor só pode ser montado para administrador ou proprietário");
   assert.match(painel, /Api\.usuarios\.equipe\(\)/);
+});
+
+check("a troca de responsável é administrativa, idempotente e protege concorrência", () => {
+  const migration = fs.readFileSync(
+    path.join(root, "database/migrations/flow_45_admin_request_owner.sql"), "utf8"
+  );
+  assert.match(migration, /auth\.uid\(\) is null or not public\.flow_is_admin\(\)/i);
+  assert.match(migration, /p\.owner_profile_id is distinct from p_expected_owner_profile_id|pedido\.owner_profile_id is distinct from p_expected_owner_profile_id/i,
+    "uma ficha desatualizada não pode sobrescrever outra administração");
+  assert.match(migration, /role in \('operador', 'administrador', 'proprietario'\)/i);
+  assert.match(migration, /and active[\s\S]*for share/i,
+    "o perfil precisa continuar válido durante a atribuição");
+  assert.match(migration, /'responsavel_alterado'[\s\S]*nome_anterior[\s\S]*nome_novo/i,
+    "o histórico precisa guardar os nomes anterior e novo");
+  assert.match(migration, /assigned_by_id = auth\.uid\(\)/i);
+  assert.match(migration, /create trigger flow_guard_request_owner_update[\s\S]*before update of owner_profile_id, owner_name, assigned_by_id, assigned_at/i,
+    "uma atualização direta do PostgREST não pode contornar o RPC");
+  assert.match(migration, /current_setting\('grcon_flow\.owner_change_authorized', true\)[\s\S]*not public\.flow_is_admin\(\)/i,
+    "o banco precisa exigir a autorização administrativa mesmo fora da interface");
+  assert.match(migration, /set_config\('grcon_flow\.owner_change_authorized', '1', true\)[\s\S]*update public\.flow_requests[\s\S]*set_config\('grcon_flow\.owner_change_authorized', '', true\)/i,
+    "somente a transação controlada pode abrir e fechar a troca de responsável");
+  assert.match(migration, /if p_field = 'owner_name'[\s\S]*Use a seleção administrativa de responsável/i,
+    "o RPC antigo não pode contornar a validação por UUID");
+  assert.match(migration, /revoke all on function public\.flow_set_request_owner\(uuid,uuid,uuid\)[\s\S]*from public, anon, authenticated/i);
+
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(api, /async definirResponsavel\(id, ownerProfileId, expectedOwnerProfileId\)/);
+  assert.match(api, /if \(!auth\.ehAdmin\(\)\)/);
+  assert.match(api, /p_expected_owner_profile_id: expectedOwnerProfileId \|\| null/);
+});
+
+check("a ficha lateral não cria rolagem horizontal e mantém ações fixas", () => {
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  const css = fs.readFileSync(path.join(root, "flow.css"), "utf8");
+  assert.match(painel, /id: "painel-drawer-rodape"/);
+  assert.match(painel, /definirRodapeGaveta\(\[botaoSalvar, botaoReprocessar, botaoExcluir\]\)/);
+  assert.match(painel, /Código e informações documentais/);
+  assert.match(painel, /Triagem nas LDs/);
+  assert.doesNotMatch(painel, /class: "flow-tabela"[\s\S]{0,500}Concluir todos os itens/,
+    "os itens da ficha não devem voltar à tabela horizontal");
+  assert.match(css, /\.flow-drawer-corpo \{[\s\S]*overflow-y: auto; overflow-x: hidden/);
+  assert.match(css, /\.flow-drawer-painel \{[\s\S]*width: min\(64rem, calc\(100vw/);
+  assert.match(css, /\.flow-drawer-rodape \{[\s\S]*flex-wrap: wrap/);
+  assert.doesNotMatch(css, /\.flow-drawer-corpo \.flow-tabela \{ min-width: 46rem; \}/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.flow-drawer-painel \{ width: 100vw/);
 });
 
 
