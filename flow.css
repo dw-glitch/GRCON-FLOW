@@ -89,10 +89,62 @@
   /* Registro rápido da Qualidade: compacto o bastante para lançar sem sair
      da fila, amplo o bastante para não transformar os códigos em um campo
      apertado. O modal só é montado para operador, administrador ou dono. */
-  .flow-registro-rapido .flow-modal-painel { width: min(46rem, 100%); }
+  .flow-registro-rapido .flow-modal-painel { width: min(54rem, 100%); }
   .flow-registro-rapido .flow-modal-corpo { gap: 1rem; }
+  .flow-registro-rapido-inteligencia {
+    border: 1px solid var(--border-2); border-radius: var(--radius-md); background: var(--brand-50);
+  }
+  .flow-registro-rapido-inteligencia summary {
+    display: flex; align-items: baseline; justify-content: space-between; gap: .8rem;
+    padding: .72rem .85rem; cursor: pointer; color: var(--brand-800); list-style: none;
+  }
+  .flow-registro-rapido-inteligencia summary::-webkit-details-marker { display: none; }
+  .flow-registro-rapido-inteligencia summary::after { content: "+"; font-size: 1rem; }
+  .flow-registro-rapido-inteligencia[open] summary::after { content: "−"; }
+  .flow-registro-rapido-inteligencia summary strong { font-size: .84rem; }
+  .flow-registro-rapido-inteligencia summary span { font-size: .72rem; color: var(--text-3); }
+  .flow-registro-rapido-inteligencia-corpo {
+    display: grid; gap: .65rem; padding: 0 .85rem .85rem;
+  }
+  .flow-registro-rapido-colagem {
+    width: 100%; min-height: 7.5rem; resize: vertical; padding: .7rem .8rem;
+    border: 1px solid var(--border-1); border-radius: var(--radius-sm);
+    background: var(--surface-1); color: var(--text-1); line-height: 1.45;
+  }
+  .flow-registro-rapido-favoritos {
+    display: grid; gap: .55rem; padding: .72rem .8rem;
+    border: 1px solid var(--border-1); border-radius: var(--radius-md); background: var(--surface-2);
+  }
+  .flow-registro-rapido-favoritos-head,
+  .flow-registro-rapido-editor-head {
+    display: flex; align-items: center; justify-content: space-between; gap: .65rem;
+  }
+  .flow-registro-rapido-favoritos-head > strong,
+  .flow-registro-rapido-editor-head > strong { font-size: .8rem; color: var(--text-2); }
+  .flow-registro-rapido-favoritos-lista { display: flex; flex-wrap: wrap; gap: .45rem; }
+  .flow-registro-rapido-favorito {
+    display: inline-flex; align-items: center; gap: .35rem; min-width: 0;
+    padding: .28rem .4rem; border: 1px solid var(--border-1); border-radius: 999px;
+    background: var(--surface-1);
+  }
+  .flow-registro-rapido-favorito > span { max-width: 12rem; color: var(--text-3); font-size: .66rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .flow-registro-rapido-favorito-aplicar {
+    border: 0; background: transparent; color: var(--brand-800); cursor: pointer;
+    font-size: .76rem; font-weight: 700;
+  }
+  .flow-registro-rapido-favorito-aplicar:hover { text-decoration: underline; }
+  .flow-registro-rapido-favorito-acoes { display: inline-flex; align-items: center; gap: .05rem; }
+  .flow-registro-rapido-favorito-acoes .text-button { min-height: 1.8rem; padding: .2rem .35rem; font-size: .68rem; }
+  .flow-registro-rapido-vazio { color: var(--text-3); font-size: .74rem; }
+  .flow-registro-rapido-vazio.erro { color: var(--danger-700); }
+  .flow-registro-rapido-favorito-editor {
+    display: grid; gap: .7rem; padding: .75rem; margin-top: .15rem;
+    border-top: 1px solid var(--border-1); background: var(--surface-1); border-radius: var(--radius-sm);
+  }
+  .flow-registro-rapido-favorito-editor[hidden] { display: none; }
   .flow-registro-rapido-resumo { min-height: 6.5rem !important; }
   .flow-registro-rapido-documentos { min-height: 7.5rem !important; font-family: var(--font-mono); font-size: .82rem; }
+  .flow-preenchido-inteligente { border-color: var(--success-700) !important; background: #f3fbf7 !important; box-shadow: 0 0 0 2px rgb(39 128 85 / 10%); }
   .flow-registro-rapido-arquivos { display: grid; gap: .45rem; }
   .flow-registro-rapido-arquivo {
     display: flex; align-items: center; justify-content: space-between; gap: .65rem;
@@ -103,6 +155,10 @@
   .flow-registro-rapido-progresso { min-height: 1.25rem; margin: 0; font-size: .78rem; color: var(--text-3); }
   .flow-registro-rapido-progresso.erro { color: var(--danger-700); }
   .flow-registro-rapido-progresso.ok { color: var(--success-700); }
+  .flow-registro-rapido-revisao {
+    padding: .65rem .75rem; border-left: 3px solid var(--brand-600); border-radius: var(--radius-sm);
+    background: var(--brand-50); color: var(--brand-800); font-size: .78rem; font-weight: 650;
+  }
 
   /* ── Caixa de entrada da Qualidade ───────────────────────────────────── */
   .flow-notificacoes { position: relative; flex: 0 0 auto; }

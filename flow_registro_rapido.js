@@ -13,6 +13,7 @@
   const Ui = root.FlowUi;
   const Api = root.FlowApi;
   const Docs = root.FlowDocs;
+  const Parser = root.FlowQuickParse;
   const { elemento, avisar, texto } = Ui;
 
   let modal = null;
@@ -22,6 +23,11 @@
   let arquivos = [];
   let enviando = false;
   let clientRequestId = "";
+  let favoritos = [];
+  let gerenciandoFavoritos = false;
+  let origemPreenchimento = "manual";
+  let canalOrigem = "";
+  let favoritoAplicadoId = "";
 
   function uuid() {
     if (root.crypto && typeof root.crypto.randomUUID === "function") return root.crypto.randomUUID();
@@ -53,6 +59,84 @@
     return tiposAtuais.find((tipo) => tipo.code === codigo) || null;
   }
 
+  function tipoPorCodigo(codigo) {
+    return tiposAtuais.find((tipo) => tipo.code === texto(codigo)) || null;
+  }
+
+  function definirValor(id, valor, { destaque = false } = {}) {
+    const entrada = document.getElementById(id);
+    if (!entrada) return;
+    entrada.value = valor === null || valor === undefined ? "" : String(valor);
+    entrada.classList.toggle("flow-preenchido-inteligente", Boolean(destaque && texto(valor)));
+  }
+
+  function quantidadeDocumentos() {
+    const tipo = tipoSelecionado();
+    const bruto = texto(document.getElementById("rapido-documentos")?.value);
+    if (!tipo || !(tipo.allows_documents || tipo.requires_document) || !bruto) return 0;
+    return Docs.semRepetidos(Docs.daListaFlexivel(bruto)).itens.length;
+  }
+
+  function atualizarRevisao() {
+    const destino = document.getElementById("rapido-revisao");
+    if (!destino) return;
+    const nome = texto(document.getElementById("rapido-solicitante")?.value) || "solicitante pendente";
+    const tipo = tipoSelecionado();
+    const partes = [nome, tipo ? tipo.label : "tipo pendente"];
+    const documentos = quantidadeDocumentos();
+    if (documentos) partes.push(`${documentos} documento(s)`);
+    if (arquivos.length) partes.push(`${arquivos.length} anexo(s)`);
+    destino.textContent = `Revise antes de registrar: ${partes.join(" · ")}.`;
+  }
+
+  function resumoDaAnalise(resultado) {
+    const encontrados = [];
+    if (resultado.nome) encontrados.push("solicitante");
+    if (resultado.contato) encontrados.push("contato");
+    if (resultado.area) encontrados.push("área");
+    if (resultado.tipoCodigo) encontrados.push("tipo sugerido");
+    if (resultado.documentos.length) encontrados.push(`${resultado.documentos.length} código(s)`);
+    if (resultado.titulos.length) encontrados.push(`${resultado.titulos.length} título(s)`);
+    return encontrados.length
+      ? `Preenchido: ${encontrados.join(" · ")}. Confira os campos destacados.`
+      : "A mensagem foi organizada, mas os dados principais precisam ser informados manualmente.";
+  }
+
+  function analisarMensagem() {
+    if (!Parser || typeof Parser.analisar !== "function") {
+      avisar("O preenchimento inteligente não foi carregado. Recarregue a página.", "erro");
+      return;
+    }
+    const origem = document.getElementById("rapido-colagem");
+    const bruto = texto(origem && origem.value);
+    if (!bruto) {
+      avisar("Cole a mensagem recebida antes de analisar.", "erro");
+      if (origem) origem.focus();
+      return;
+    }
+    const resultado = Parser.analisar(bruto, { tipos: tiposAtuais });
+    definirValor("rapido-solicitante", resultado.nome, { destaque: true });
+    definirValor("rapido-area", resultado.area, { destaque: true });
+    definirValor("rapido-contato", resultado.contato, { destaque: true });
+    definirValor("rapido-pedido", resultado.pedido, { destaque: true });
+    definirValor("rapido-tipo", tipoPorCodigo(resultado.tipoCodigo) ? resultado.tipoCodigo : "", { destaque: true });
+    definirValor(
+      "rapido-documentos",
+      [...resultado.documentos, ...resultado.titulos].join("\n"),
+      { destaque: true }
+    );
+    origemPreenchimento = "colagem_inteligente";
+    canalOrigem = resultado.canal || "texto";
+    favoritoAplicadoId = "";
+    atualizarDocumentos();
+    atualizarRevisao();
+    const status = document.getElementById("rapido-analise-status");
+    if (status) {
+      status.className = "flow-registro-rapido-progresso ok";
+      status.textContent = resumoDaAnalise(resultado);
+    }
+  }
+
   function totalBytes() {
     return arquivos.reduce((total, arquivo) => total + (Number(arquivo.size) || 0), 0);
   }
@@ -74,6 +158,7 @@
         onclick: () => { arquivos.splice(indice, 1); desenharArquivos(); },
       }),
     ])));
+    atualizarRevisao();
   }
 
   function receberArquivos(lista) {
@@ -106,6 +191,193 @@
     bloco.hidden = !documental;
     const entrada = document.getElementById("rapido-documentos");
     if (entrada) entrada.required = Boolean(tipo && tipo.requires_document);
+    atualizarRevisao();
+  }
+
+  function fecharEditorFavorito() {
+    const editor = document.getElementById("rapido-favorito-editor");
+    if (!editor) return;
+    editor.hidden = true;
+    editor.replaceChildren();
+  }
+
+  function aplicarFavorito(favorito) {
+    const tipo = tipoPorCodigo(favorito && favorito.type_code);
+    if (!tipo) {
+      avisar("O tipo deste favorito está inativo. Edite o favorito antes de usar.", "erro");
+      return;
+    }
+    definirValor("rapido-tipo", tipo.code, { destaque: true });
+    definirValor("rapido-area", favorito.requester_area || "", { destaque: true });
+    definirValor("rapido-pedido", favorito.request_text || "", { destaque: true });
+    origemPreenchimento = "modelo_favorito";
+    canalOrigem = "";
+    favoritoAplicadoId = favorito.id || "";
+    atualizarDocumentos();
+    atualizarRevisao();
+    const status = document.getElementById("rapido-analise-status");
+    if (status) {
+      status.className = "flow-registro-rapido-progresso ok";
+      status.textContent = `Favorito “${favorito.name}” aplicado. Informe o solicitante e revise o pedido.`;
+    }
+    const solicitante = document.getElementById("rapido-solicitante");
+    if (solicitante) solicitante.focus();
+  }
+
+  function abrirEditorFavorito(favorito = null) {
+    const editor = document.getElementById("rapido-favorito-editor");
+    if (!editor) return;
+    const atual = favorito || {};
+    const nome = elemento("input", {
+      id: "rapido-favorito-nome", type: "text", maxlength: "60", autocomplete: "off",
+      value: atual.name || "", placeholder: "Ex.: Postagem no SIGEM",
+    });
+    const selecao = elemento("select", { id: "rapido-favorito-tipo", required: true });
+    selecao.append(elemento("option", { value: "", text: "Selecione…" }));
+    tiposAtuais.forEach((tipo) => selecao.append(elemento("option", {
+      value: tipo.code, text: tipo.label,
+    })));
+    selecao.value = atual.type_code || texto(document.getElementById("rapido-tipo")?.value);
+    const area = elemento("input", {
+      id: "rapido-favorito-area", type: "text", maxlength: "120", autocomplete: "off",
+      value: favorito ? atual.requester_area || "" : texto(document.getElementById("rapido-area")?.value),
+      placeholder: "Opcional",
+    });
+    const pedido = elemento("textarea", {
+      id: "rapido-favorito-pedido", rows: "3", maxlength: "2000",
+      placeholder: "Texto-base opcional, sem nome, contato ou códigos específicos.",
+    });
+    // Um novo favorito começa sem copiar o pedido atual. Isso impede que nome,
+    // contato ou código de uma solicitação real sejam reaproveitados por engano.
+    pedido.value = favorito ? atual.request_text || "" : "";
+    const status = elemento("p", { class: "flow-registro-rapido-progresso", role: "status", "aria-live": "polite" });
+    const salvar = elemento("button", {
+      class: "primary-button compact", type: "button", text: favorito ? "Salvar alterações" : "Salvar favorito",
+      onclick: async () => {
+        if (!texto(nome.value)) { status.className = "flow-registro-rapido-progresso erro"; status.textContent = "Dê um nome ao favorito."; nome.focus(); return; }
+        if (!texto(selecao.value)) { status.className = "flow-registro-rapido-progresso erro"; status.textContent = "Escolha o tipo do favorito."; selecao.focus(); return; }
+        const conteudoModelo = Parser && typeof Parser.analisar === "function"
+          ? Parser.analisar(pedido.value, { tipos: tiposAtuais })
+          : { nome: "", contato: "", documentos: [] };
+        if (conteudoModelo.nome || conteudoModelo.contato || conteudoModelo.documentos.length) {
+          status.className = "flow-registro-rapido-progresso erro";
+          status.textContent = "Retire nomes, contatos e códigos específicos do texto-base.";
+          pedido.focus();
+          return;
+        }
+        salvar.disabled = true;
+        salvar.textContent = "Salvando…";
+        const retorno = await Api.modelosRapidos.salvar({
+          id: atual.id,
+          name: nome.value,
+          type_code: selecao.value,
+          requester_area: area.value,
+          request_text: pedido.value,
+          sort_order: favorito ? atual.sort_order : favoritos.length,
+        });
+        salvar.disabled = false;
+        salvar.textContent = favorito ? "Salvar alterações" : "Salvar favorito";
+        if (retorno.error) {
+          status.className = "flow-registro-rapido-progresso erro";
+          status.textContent = retorno.error;
+          return;
+        }
+        fecharEditorFavorito();
+        await carregarFavoritos();
+        avisar(favorito ? "Favorito atualizado." : "Favorito salvo.", "ok");
+      },
+    });
+    editor.hidden = false;
+    editor.replaceChildren(
+      elemento("div", { class: "flow-registro-rapido-editor-head" }, [
+        elemento("strong", { text: favorito ? "Editar favorito" : "Novo favorito" }),
+        elemento("button", { class: "text-button", type: "button", text: "Fechar", onclick: fecharEditorFavorito }),
+      ]),
+      elemento("div", { class: "flow-grid" }, [
+        campo("rapido-favorito-nome", "Nome", nome, { obrigatorio: true }),
+        campo("rapido-favorito-tipo", "Tipo", selecao, { obrigatorio: true }),
+        campo("rapido-favorito-area", "Área padrão", area),
+      ]),
+      campo("rapido-favorito-pedido", "Texto-base", pedido, {
+        largo: true, ajuda: "Solicitante, contato, documentos e anexos nunca são salvos no favorito.",
+      }),
+      status,
+      elemento("div", { class: "flow-acoes" }, [salvar])
+    );
+    nome.focus();
+  }
+
+  async function excluirFavorito(favorito) {
+    const confirmou = await Ui.confirmar(`Excluir o favorito “${favorito.name}”?`, {
+      titulo: "Excluir favorito", rotuloConfirmar: "Excluir", perigo: true,
+      ajuda: "Somente o modelo será apagado. Solicitações já registradas não serão alteradas.",
+    });
+    if (!confirmou) return;
+    const { error } = await Api.modelosRapidos.excluir(favorito.id);
+    if (error) { avisar(error, "erro"); return; }
+    await carregarFavoritos();
+    avisar("Favorito excluído.", "ok");
+  }
+
+  async function moverFavorito(indice, deslocamento) {
+    const destino = indice + deslocamento;
+    if (destino < 0 || destino >= favoritos.length) return;
+    const anterior = favoritos.slice();
+    [favoritos[indice], favoritos[destino]] = [favoritos[destino], favoritos[indice]];
+    desenharFavoritos();
+    const { error } = await Api.modelosRapidos.reordenar(favoritos);
+    if (error) {
+      favoritos = anterior;
+      desenharFavoritos();
+      avisar(error, "erro");
+    }
+  }
+
+  function desenharFavoritos() {
+    const destino = document.getElementById("rapido-favoritos-lista");
+    const gerenciar = document.getElementById("rapido-favoritos-gerenciar");
+    const salvar = document.getElementById("rapido-favoritos-salvar");
+    if (!destino) return;
+    if (gerenciar) {
+      gerenciar.hidden = !favoritos.length;
+      gerenciar.textContent = gerenciandoFavoritos ? "Concluir" : "Gerenciar";
+      gerenciar.setAttribute("aria-pressed", gerenciandoFavoritos ? "true" : "false");
+    }
+    if (salvar) salvar.disabled = favoritos.length >= (Api.modelosRapidos.limite || 20);
+    if (!favoritos.length) {
+      destino.replaceChildren(elemento("span", { class: "flow-registro-rapido-vazio", text: "Nenhum favorito salvo." }));
+      return;
+    }
+    destino.replaceChildren(...favoritos.map((favorito, indice) => elemento("div", {
+      class: "flow-registro-rapido-favorito",
+    }, [
+      elemento("button", {
+        class: "flow-registro-rapido-favorito-aplicar", type: "button",
+        text: favorito.name, title: `Usar ${favorito.name}`,
+        onclick: () => aplicarFavorito(favorito),
+      }),
+      elemento("span", { text: tipoPorCodigo(favorito.type_code)?.label || "Tipo inativo" }),
+      gerenciandoFavoritos ? elemento("div", { class: "flow-registro-rapido-favorito-acoes" }, [
+        elemento("button", { class: "text-button", type: "button", text: "↑", title: "Mover para cima", disabled: indice === 0, onclick: () => moverFavorito(indice, -1) }),
+        elemento("button", { class: "text-button", type: "button", text: "↓", title: "Mover para baixo", disabled: indice === favoritos.length - 1, onclick: () => moverFavorito(indice, 1) }),
+        elemento("button", { class: "text-button", type: "button", text: "Editar", onclick: () => abrirEditorFavorito(favorito) }),
+        elemento("button", { class: "text-button danger", type: "button", text: "Excluir", onclick: () => excluirFavorito(favorito) }),
+      ]) : null,
+    ])));
+  }
+
+  async function carregarFavoritos() {
+    const destino = document.getElementById("rapido-favoritos-lista");
+    if (destino) destino.replaceChildren(elemento("span", { class: "flow-registro-rapido-vazio", text: "Carregando favoritos…" }));
+    const { data, error } = await Api.modelosRapidos.listar();
+    if (!modal) return;
+    if (error) {
+      favoritos = [];
+      if (destino) destino.replaceChildren(elemento("span", { class: "flow-registro-rapido-vazio erro", text: error }));
+      return;
+    }
+    favoritos = data || [];
+    desenharFavoritos();
   }
 
   function fechar() {
@@ -184,6 +456,11 @@
       ? Docs.semRepetidos(Docs.daListaFlexivel(brutoDocumentos)).itens
       : [];
     const pedido = texto(document.getElementById("rapido-pedido")?.value);
+    const origemRotulo = origemPreenchimento === "colagem_inteligente"
+      ? "Colagem inteligente pela Qualidade"
+      : origemPreenchimento === "modelo_favorito"
+        ? "Modelo favorito pela Qualidade"
+        : "Registro rápido pela Qualidade";
     const { data, error } = await Api.solicitacoes.criarRapida({
       tipo: tipo.code,
       nome: document.getElementById("rapido-solicitante").value,
@@ -193,7 +470,10 @@
       descricao: pedido,
       formulario: {
         pedido_resumido: pedido,
-        origem_registro: "Registro rápido pela Qualidade",
+        origem_registro: origemRotulo,
+        origem_preenchimento: origemPreenchimento,
+        canal_origem: canalOrigem,
+        modelo_rapido_id: favoritoAplicadoId,
         _client_request_id: clientRequestId,
       },
       itens,
@@ -245,12 +525,35 @@
     arquivos = [];
     enviando = false;
     clientRequestId = "";
+    favoritos = [];
+    gerenciandoFavoritos = false;
+    origemPreenchimento = "manual";
+    canalOrigem = "";
+    favoritoAplicadoId = "";
     retornoFoco = document.activeElement;
 
     const selecaoTipo = elemento("select", { id: "rapido-tipo", required: true });
     selecaoTipo.append(elemento("option", { value: "", text: "Selecione…" }));
     tiposAtuais.forEach((tipo) => selecaoTipo.append(elemento("option", { value: tipo.code, text: tipo.label })));
     selecaoTipo.addEventListener("change", atualizarDocumentos);
+
+    const colagem = elemento("textarea", {
+      id: "rapido-colagem", class: "flow-registro-rapido-colagem", rows: "5", maxlength: "20000",
+      placeholder: "Cole aqui a mensagem recebida pelo Teams, Outlook ou outro canal.",
+    });
+    const botaoAnalisar = elemento("button", {
+      id: "rapido-analisar", class: "primary-button compact", type: "button",
+      text: "Analisar e preencher", onclick: analisarMensagem,
+    });
+    const botaoLimparMensagem = elemento("button", {
+      class: "text-button", type: "button", text: "Limpar mensagem",
+      onclick: () => {
+        colagem.value = "";
+        const status = document.getElementById("rapido-analise-status");
+        if (status) { status.className = "flow-registro-rapido-progresso"; status.textContent = ""; }
+        colagem.focus();
+      },
+    });
 
     const solicitante = elemento("input", {
       id: "rapido-solicitante", type: "text", required: true,
@@ -274,6 +577,23 @@
       entradaArquivos.value = "";
     });
 
+    [solicitante, area, contato, pedido, documentos].forEach((entrada) => {
+      entrada.addEventListener("input", () => {
+        entrada.classList.remove("flow-preenchido-inteligente");
+        atualizarRevisao();
+      });
+    });
+    selecaoTipo.addEventListener("change", () => selecaoTipo.classList.remove("flow-preenchido-inteligente"));
+
+    const botaoSalvarFavorito = elemento("button", {
+      id: "rapido-favoritos-salvar", class: "text-button", type: "button", text: "+ Novo favorito",
+      onclick: () => abrirEditorFavorito(),
+    });
+    const botaoGerenciarFavoritos = elemento("button", {
+      id: "rapido-favoritos-gerenciar", class: "text-button", type: "button", text: "Gerenciar", hidden: true,
+      onclick: () => { gerenciandoFavoritos = !gerenciandoFavoritos; fecharEditorFavorito(); desenharFavoritos(); },
+    });
+
     const botaoFechar = elemento("button", {
       id: "rapido-cancelar", class: "secondary-button", type: "button", text: "Cancelar", onclick: fechar,
     });
@@ -294,6 +614,28 @@
           elemento("button", { class: "text-button", type: "button", text: "Fechar", onclick: fechar }),
         ]),
         elemento("div", { class: "flow-modal-corpo" }, [
+          elemento("details", { class: "flow-registro-rapido-inteligencia", open: true }, [
+            elemento("summary", {}, [
+              elemento("strong", { text: "Preencher pela mensagem" }),
+              elemento("span", { text: "Teams, Outlook ou texto livre" }),
+            ]),
+            elemento("div", { class: "flow-registro-rapido-inteligencia-corpo" }, [
+              colagem,
+              elemento("div", { class: "flow-acoes" }, [botaoAnalisar, botaoLimparMensagem]),
+              elemento("p", {
+                id: "rapido-analise-status", class: "flow-registro-rapido-progresso",
+                role: "status", "aria-live": "polite",
+              }),
+            ]),
+          ]),
+          elemento("section", { class: "flow-registro-rapido-favoritos", "aria-labelledby": "rapido-favoritos-titulo" }, [
+            elemento("div", { class: "flow-registro-rapido-favoritos-head" }, [
+              elemento("strong", { id: "rapido-favoritos-titulo", text: "Meus favoritos" }),
+              elemento("div", { class: "flow-acoes" }, [botaoSalvarFavorito, botaoGerenciarFavoritos]),
+            ]),
+            elemento("div", { id: "rapido-favoritos-lista", class: "flow-registro-rapido-favoritos-lista" }),
+            elemento("div", { id: "rapido-favorito-editor", class: "flow-registro-rapido-favorito-editor", hidden: true }),
+          ]),
           elemento("div", { class: "flow-grid" }, [
             campo("rapido-tipo", "Tipo", selecaoTipo, { obrigatorio: true }),
             campo("rapido-solicitante", "Solicitante", solicitante, { obrigatorio: true }),
@@ -314,6 +656,9 @@
           }),
           elemento("p", { id: "rapido-arquivos-resumo", class: "flow-registro-rapido-progresso" }),
           elemento("div", { id: "rapido-arquivos-lista", class: "flow-registro-rapido-arquivos" }),
+          elemento("div", {
+            id: "rapido-revisao", class: "flow-registro-rapido-revisao", role: "status", "aria-live": "polite",
+          }),
           elemento("p", {
             id: "rapido-progresso", class: "flow-registro-rapido-progresso", role: "status", "aria-live": "polite",
           }),
@@ -340,7 +685,9 @@
     });
     document.body.append(modal);
     desenharArquivos();
-    solicitante.focus();
+    atualizarRevisao();
+    carregarFavoritos();
+    colagem.focus();
   }
 
   root.FlowRegistroRapido = Object.freeze({ abrir });

@@ -177,6 +177,10 @@
     if (/canceling statement due to statement timeout|statement timeout/i.test(bruto)) {
       return "O servidor levou mais tempo que o permitido. O protocolo, quando já exibido, continua salvo; tente novamente somente a etapa pendente.";
     }
+    if (/flow_quick_templates_owner_name_uidx|duplicate key.*flow_quick_templates/i.test(bruto)) {
+      return "Já existe um favorito com esse nome.";
+    }
+    if (/Você pode manter até 20 favoritos/i.test(bruto)) return "Você pode manter até 20 favoritos.";
     if (/LI\/MC.*N-1710|PDF e o Excel|PDF \+ Excel|PDF obrigatório|Excel obrigatório/i.test(bruto)) return bruto;
     if (/Limite de \d+ anexos complementares/i.test(bruto)) {
       return `Esta solicitação já tem o limite de ${MAXIMO_ANEXOS} anexos complementares.`;
@@ -407,6 +411,69 @@
 
     async removerCampo(id) {
       return chamar(client.from("flow_type_fields").delete().eq("id", id), "remover campo");
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Modelos pessoais do Registro rápido
+  // ---------------------------------------------------------------------------
+  const modelosRapidos = {
+    limite: 20,
+
+    async listar() {
+      if (!auth.ehEquipe()) return { data: [], error: "Somente a equipe da Qualidade pode usar modelos rápidos." };
+      const retorno = await chamar(
+        client.from("flow_quick_templates")
+          .select("id,name,type_code,requester_area,request_text,sort_order,created_at,updated_at")
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: true })
+          .limit(20),
+        "carregar modelos rápidos"
+      );
+      return { data: retorno.data || [], error: retorno.error };
+    },
+
+    async salvar(modelo) {
+      if (!auth.ehEquipe()) return { data: null, error: "Somente a equipe da Qualidade pode salvar modelos rápidos." };
+      const registro = {
+        name: texto(modelo && modelo.name).slice(0, 60),
+        type_code: texto(modelo && modelo.type_code),
+        requester_area: texto(modelo && modelo.requester_area).slice(0, 120),
+        request_text: texto(modelo && modelo.request_text).slice(0, 2000),
+        sort_order: Math.max(0, Number(modelo && modelo.sort_order) || 0),
+        updated_at: new Date().toISOString(),
+      };
+      if (!registro.name) return { data: null, error: "Dê um nome ao favorito." };
+      if (!registro.type_code) return { data: null, error: "Escolha o tipo do favorito." };
+      const consulta = modelo && modelo.id
+        ? client.from("flow_quick_templates").update(registro).eq("id", modelo.id).select().single()
+        : client.from("flow_quick_templates").insert(registro).select().single();
+      return chamar(consulta, modelo && modelo.id ? "atualizar modelo rápido" : "salvar modelo rápido");
+    },
+
+    async excluir(id) {
+      if (!auth.ehEquipe()) return { error: "Somente a equipe da Qualidade pode excluir modelos rápidos." };
+      if (!texto(id)) return { error: "Modelo inválido." };
+      const { error } = await chamar(
+        client.from("flow_quick_templates").delete().eq("id", id),
+        "excluir modelo rápido"
+      );
+      return { error };
+    },
+
+    async reordenar(modelos) {
+      if (!auth.ehEquipe()) return { error: "Somente a equipe da Qualidade pode reorganizar modelos rápidos." };
+      const lista = (modelos || []).filter((modelo) => texto(modelo && modelo.id));
+      for (let indice = 0; indice < lista.length; indice += 1) {
+        const { error } = await chamar(
+          client.from("flow_quick_templates")
+            .update({ sort_order: indice, updated_at: new Date().toISOString() })
+            .eq("id", lista[indice].id),
+          "reorganizar modelos rápidos"
+        );
+        if (error) return { error };
+      }
+      return { error: null };
     },
   };
 
@@ -1434,7 +1501,7 @@
   };
 
   root.FlowApi = Object.freeze({
-    client, config, auth, tipos, solicitacoes, itens, triagem, lds, normas,
+    client, config, auth, tipos, modelosRapidos, solicitacoes, itens, triagem, lds, normas,
     comentarios, anexos, armazenamento, historico, notificacoes, usuarios, acesso, exportacao,
     ORDENS_DE_SOLICITACAO,
   });

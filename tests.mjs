@@ -27,12 +27,14 @@ janela.GrconRequestsReport = require(path.join(root, "requests_report.js"));
 janela.document = { createElement: () => ({ style: {} }) };
 
 await import(`file://${path.join(root, "flow_docs.js")}`);
+await import(`file://${path.join(root, "flow_quick_parse.js")}`);
 await import(`file://${path.join(root, "flow_export.js")}`);
 // flow_ui.js só toca no DOM dentro das funções; carregá-lo aqui permite
 // exercitar o vocabulário compartilhado em vez de conferi-lo por regex.
 await import(`file://${path.join(root, "flow_ui.js")}`);
 
 const Docs = janela.FlowDocs;
+const QuickParse = janela.FlowQuickParse;
 const Export = janela.FlowExport;
 const Report = janela.GrconRequestsReport;
 
@@ -1024,6 +1026,107 @@ check("o registro rápido é exclusivo da equipe e preserva o fluxo resiliente",
     "a triagem precisa continuar fora da transação do protocolo");
   assert.match(rapido, /Api\.anexos\.enviar\(/,
     "os anexos precisam continuar usando Storage e metadados, não o banco binário");
+});
+
+check("a colagem do Outlook preenche somente dados reconhecidos e limpa cabeçalhos", () => {
+  const mensagem = [
+    "De: João Silva <joao.silva@agnet.com.br>",
+    "Enviado: sexta-feira, 28 de agosto de 2026 13:30",
+    "Para: Qualidade",
+    "Assunto: Postagem no SIGEM",
+    "Área: Planejamento",
+    "Favor realizar a postagem no SIGEM dos documentos abaixo.",
+    "C1O-RNEST-U32-3.8.9.1-TUB-REP-VM-322567",
+    "MC-5290.00-22313-970-C1O-009_0001_RIR.xlsx",
+    "Atenciosamente",
+    "João Silva",
+  ].join("\n");
+  const resultado = QuickParse.analisar(mensagem, { tipos: [
+    { code: "POSTAGEM_SIGEM", label: "Postagem no SIGEM", active: true },
+  ] });
+  assert.equal(resultado.nome, "João Silva");
+  assert.equal(resultado.contato, "joao.silva@agnet.com.br");
+  assert.equal(resultado.area, "Planejamento");
+  assert.equal(resultado.tipoCodigo, "POSTAGEM_SIGEM");
+  assert.equal(resultado.canal, "outlook");
+  assert.deepEqual(resultado.documentos, [
+    "C1O-RNEST-U32-3.8.9.1-TUB-REP-VM-322567",
+    "MC-5290.00-22313-970-C1O-009",
+  ]);
+  assert.doesNotMatch(resultado.pedido, /De:|Enviado:|Para:|Atenciosamente|joao\.silva@/i);
+  assert.match(resultado.pedido, /Favor realizar a postagem/);
+});
+
+check("a colagem do Teams reconhece a pessoa e preserva pedido somente com título", () => {
+  const resultado = QuickParse.analisar([
+    "Maria Souza",
+    "13:45",
+    "Preciso alterar o título deste documento.",
+    "Título do documento: Relatório de inspeção da válvula VM-322567",
+  ].join("\n"), { tipos: [
+    { code: "ALTERACAO_TITULO", label: "Alteração de título", active: true },
+  ] });
+  assert.equal(resultado.nome, "Maria Souza");
+  assert.equal(resultado.canal, "teams");
+  assert.equal(resultado.tipoCodigo, "ALTERACAO_TITULO");
+  assert.deepEqual(resultado.titulos, ["Relatório de inspeção da válvula VM-322567"]);
+  assert.equal(resultado.documentos.length, 0, "um título não pode ser convertido em código");
+});
+
+check("a análise não inventa tipo nem pessoa quando a mensagem é ambígua", () => {
+  const resultado = QuickParse.analisar("Olá, preciso de ajuda com este assunto.\nPode verificar para mim?", {
+    tipos: [{ code: "CONSULTA_INFO", label: "Consulta / Solicitação de informação", active: true }],
+  });
+  assert.equal(resultado.nome, "");
+  assert.equal(resultado.contato, "");
+  assert.equal(resultado.area, "");
+  assert.equal(resultado.tipoCodigo, "");
+  assert.equal(resultado.documentos.length, 0);
+});
+
+check("códigos repetidos na mensagem saem uma vez e com a primeira grafia", () => {
+  const codigo = "C1O-RNEST-U32-3.8.9.1-TUB-REP-VM-322567";
+  const resultado = QuickParse.analisar(`${codigo}\n${codigo.toLowerCase()}\n28/08/2026`);
+  assert.deepEqual(resultado.documentos, [codigo]);
+});
+
+check("favoritos rápidos são pessoais, pequenos e inacessíveis ao anônimo", () => {
+  const migration = fs.readFileSync(
+    path.join(root, "database/migrations/flow_41_quick_registration_phase_2.sql"), "utf8"
+  );
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(migration, /create table if not exists public\.flow_quick_templates/i);
+  assert.match(migration, /alter table public\.flow_quick_templates enable row level security/i);
+  assert.match(migration, /\(select auth\.uid\(\)\) = owner_id/i);
+  assert.match(migration, /\(select public\.flow_is_staff\(\)\)/i);
+  assert.match(migration, /revoke all on table public\.flow_quick_templates from public, anon, authenticated/i);
+  assert.match(migration, /grant select, insert, update, delete on table public\.flow_quick_templates to authenticated/i);
+  assert.match(migration, />= 20/);
+  assert.match(migration, /security invoker/i);
+  assert.match(api, /client\.from\("flow_quick_templates"\)/);
+  const bloco = api.match(/const modelosRapidos = \{[\s\S]*?\n  \};\n\n  \/\/ -+\n  \/\/ Solicitações/)[0];
+  assert.doesNotMatch(bloco, /requester_name|requester_contact|document|attachment|arquivo/i,
+    "favorito não guarda pessoa, código ou arquivo de uma solicitação anterior");
+});
+
+check("a Fase 2 sempre leva a pessoa por análise, revisão e registro explícito", () => {
+  const html = fs.readFileSync(path.join(root, "painel.html"), "utf8");
+  const rapido = fs.readFileSync(path.join(root, "flow_registro_rapido.js"), "utf8");
+  const parser = fs.readFileSync(path.join(root, "flow_quick_parse.js"), "utf8");
+  assert.match(html, /flow_quick_parse\.js[\s\S]*flow_registro_rapido\.js/,
+    "o analisador precisa carregar antes do modal");
+  assert.match(rapido, /id: "rapido-analisar"/);
+  assert.match(rapido, /id: "rapido-revisao"/);
+  assert.match(rapido, /pedido\.value = favorito \? atual\.request_text \|\| "" : ""/,
+    "um favorito novo não pode copiar o pedido real que está no formulário");
+  assert.match(rapido, /Retire nomes, contatos e códigos específicos do texto-base/);
+  assert.match(rapido, /text: "Registrar", onclick: registrar/,
+    "analisar não pode substituir o ato explícito de registrar");
+  assert.doesNotMatch(parser, /fetch\(|XMLHttpRequest|\.rpc\(|\.from\(/,
+    "o texto colado precisa ser tratado localmente, sem serviço externo");
+  const envio = rapido.match(/const \{ data, error \} = await Api\.solicitacoes\.criarRapida\([\s\S]*?\n    \}\);/)[0];
+  assert.doesNotMatch(envio, /rapido-colagem/,
+    "a mensagem bruta não deve ser persistida junto com a solicitação");
 });
 
 // ── Urgência ───────────────────────────────────────────────────────────────

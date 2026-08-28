@@ -41,6 +41,12 @@ Histórico completo · Exportação do Controle de Solicitações
 | `/acompanhar` | quem solicitou | Consulta pelo protocolo e lista os próprios pedidos. |
 | `/painel` | equipe de qualidade | Dashboard, triagem, distribuição, Base de LDs, tipos, usuários e acesso. |
 
+No painel, a equipe da Qualidade também tem o **Registro rápido** para lançar
+pedidos recebidos por Teams, Outlook, telefone ou conversa. A Fase 2 organiza
+uma mensagem colada, sugere solicitante, contato, área, tipo e documentos, mas
+nunca registra sem revisão. Favoritos pessoais guardam apenas tipo, área e
+texto-base; solicitante, contato, códigos e anexos não são reaproveitados.
+
 **Responsável é uma pessoa, não um nome digitado.** A ficha sugere os nomes da
 equipe ativa, e o banco resolve o nome escolhido em `owner_profile_id`, com
 chave estrangeira de verdade — é o que permite avisar quem executa. O campo
