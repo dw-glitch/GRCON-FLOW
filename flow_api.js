@@ -524,6 +524,33 @@
     },
 
     /**
+     * Entrada compacta do painel. A RPC repete a autorização no Postgres:
+     * esconder o botão é conforto de interface, não a barreira de segurança.
+     */
+    async criarRapida(dados) {
+      if (!auth.ehEquipe()) {
+        return { data: null, error: "Somente a equipe da Qualidade pode usar o registro rápido." };
+      }
+      const retorno = await chamar(
+        client.rpc("flow_create_staff_request", {
+          p_type_code: dados.tipo,
+          p_requester_name: texto(dados.nome),
+          p_requester_area: texto(dados.area),
+          p_requester_contact: texto(dados.contato),
+          p_summary: texto(dados.resumo),
+          p_description: texto(dados.descricao),
+          p_form_data: dados.formulario || {},
+          p_items: dados.itens || [],
+        }),
+        "registrar solicitação pela Qualidade"
+      );
+      if (retorno.data && retorno.data.triage_completed && retorno.data.id) {
+        triadasNoServidor.add(retorno.data.id);
+      }
+      return retorno;
+    },
+
+    /**
      * Devolve a página pedida e o total do recorte. Todo filtro é aplicado no
      * servidor — inclusive os três que antes eram recortes do navegador. Peneirar
      * depois de trazer as linhas só funcionava porque a tela trazia tudo: numa

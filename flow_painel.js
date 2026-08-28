@@ -1913,6 +1913,27 @@
 
   function montarPagina() {
     const admin = Api.auth.ehAdmin();
+    const botaoRegistroRapido = Api.auth.ehEquipe() && root.FlowRegistroRapido
+      ? elemento("button", {
+        id: "painel-registro-rapido",
+        class: "primary-button compact",
+        type: "button",
+        text: "+ Registrar solicitação",
+        onclick: () => root.FlowRegistroRapido.abrir({
+          tipos: estado.tipos,
+          aoRegistrar: async (resultado) => {
+            if (estado.aba !== "solicitacoes") {
+              estado.aba = "solicitacoes";
+              guardarAbaNaUrl();
+              renderAba();
+            }
+            await carregarSolicitacoes({ manterPagina: false });
+            const indicadores = document.getElementById("painel-indicadores");
+            if (indicadores) montarIndicadores(indicadores);
+            if (resultado && resultado.id) abrirSolicitacao(resultado.id);
+          },
+        }),
+      }) : null;
     const abas = elemento("div", { class: "flow-abas", role: "tablist" },
       ABAS.filter((aba) => !aba.admin || admin).map((aba) => elemento("button", {
         class: "flow-aba", type: "button", role: "tab", "data-aba": aba.chave,
@@ -1932,7 +1953,10 @@
       elemento("main", { class: "flow-main largo" }, [
         elemento("div", { class: "flow-page-head" }, [
           elemento("h1", { id: "painel-titulo", text: "Solicitações" }),
-          montarCentralNotificacoes(),
+          elemento("div", { class: "flow-page-head-acoes" }, [
+            botaoRegistroRapido,
+            montarCentralNotificacoes(),
+          ]),
         ]),
         abas,
         elemento("div", { id: "painel-conteudo" }),

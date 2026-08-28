@@ -84,6 +84,25 @@
   .flow-page-head { display: flex; align-items: end; justify-content: space-between; gap: 1rem; margin-bottom: var(--space-5); }
   .flow-page-head h1 { margin: 0 0 .25rem; font-size: clamp(1.4rem, 3vw, 1.9rem); }
   .flow-page-head p { margin: 0; max-width: 42rem; color: var(--text-2); font-size: .88rem; }
+  .flow-page-head-acoes { display: flex; align-items: center; justify-content: flex-end; gap: .55rem; flex-wrap: wrap; }
+
+  /* Registro rápido da Qualidade: compacto o bastante para lançar sem sair
+     da fila, amplo o bastante para não transformar os códigos em um campo
+     apertado. O modal só é montado para operador, administrador ou dono. */
+  .flow-registro-rapido .flow-modal-painel { width: min(46rem, 100%); }
+  .flow-registro-rapido .flow-modal-corpo { gap: 1rem; }
+  .flow-registro-rapido-resumo { min-height: 6.5rem !important; }
+  .flow-registro-rapido-documentos { min-height: 7.5rem !important; font-family: var(--font-mono); font-size: .82rem; }
+  .flow-registro-rapido-arquivos { display: grid; gap: .45rem; }
+  .flow-registro-rapido-arquivo {
+    display: flex; align-items: center; justify-content: space-between; gap: .65rem;
+    padding: .5rem .65rem; border: 1px solid var(--border-1); border-radius: var(--radius-sm);
+    background: var(--surface-2); font-size: .78rem;
+  }
+  .flow-registro-rapido-arquivo span { min-width: 0; overflow-wrap: anywhere; }
+  .flow-registro-rapido-progresso { min-height: 1.25rem; margin: 0; font-size: .78rem; color: var(--text-3); }
+  .flow-registro-rapido-progresso.erro { color: var(--danger-700); }
+  .flow-registro-rapido-progresso.ok { color: var(--success-700); }
 
   /* ── Caixa de entrada da Qualidade ───────────────────────────────────── */
   .flow-notificacoes { position: relative; flex: 0 0 auto; }
@@ -660,6 +679,7 @@
     .flow-user { margin-left: auto; }
     .flow-user .text-button { padding-inline: .35rem; }
     .flow-page-head { display: block; }
+    .flow-page-head-acoes { justify-content: flex-start; margin-top: .75rem; }
     .flow-notificacoes { margin-top: .75rem; }
     .flow-notificacoes-botao { width: 100%; }
     .flow-notificacoes-menu { right: auto; left: 0; }

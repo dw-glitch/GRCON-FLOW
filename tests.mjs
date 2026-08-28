@@ -995,6 +995,37 @@ check("o protocolo é registrado antes da triagem pesada e pode ser retomado", (
   );
 });
 
+check("o registro rápido é exclusivo da equipe e preserva o fluxo resiliente", () => {
+  const painelHtml = fs.readFileSync(path.join(root, "painel.html"), "utf8");
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  const rapido = fs.readFileSync(path.join(root, "flow_registro_rapido.js"), "utf8");
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_40_staff_quick_registration.sql"), "utf8"
+  );
+
+  assert.match(painelHtml, /flow_registro_rapido\.js/,
+    "o módulo precisa existir somente no painel autenticado");
+  assert.match(painel, /Api\.auth\.ehEquipe\(\) && root\.FlowRegistroRapido/,
+    "solicitante não pode receber o botão no DOM");
+  assert.match(rapido, /if \(!Api\.auth\.ehEquipe\(\)\)/,
+    "o próprio módulo precisa repetir a guarda antes de registrar");
+  assert.match(api, /client\.rpc\("flow_create_staff_request"/,
+    "o modal não pode contornar a RPC exclusiva da equipe");
+  assert.match(migracao, /if not public\.flow_is_staff\(\) then/,
+    "o banco precisa ser a barreira definitiva de autorização");
+  assert.match(migracao, /security invoker/i,
+    "a entrada não precisa nem deve ampliar privilégios do chamador");
+  assert.match(migracao, /return public\.flow_create_request\(/,
+    "o registro rápido deve reutilizar a criação idempotente já corrigida");
+  assert.match(migracao, /from public, anon/);
+  assert.match(migracao, /to authenticated/);
+  assert.match(rapido, /Api\.triagem\.solicitacao\(data\.id/,
+    "a triagem precisa continuar fora da transação do protocolo");
+  assert.match(rapido, /Api\.anexos\.enviar\(/,
+    "os anexos precisam continuar usando Storage e metadados, não o banco binário");
+});
+
 // ── Urgência ───────────────────────────────────────────────────────────────
 
 check("imagem é anexo válido nos quatro portões", () => {
