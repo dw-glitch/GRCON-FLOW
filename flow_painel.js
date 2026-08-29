@@ -460,7 +460,10 @@
             : null,
         ]),
         elemento("td", { text: fmtData(solicitacao.created_at) }),
-        elemento("td", { text: texto(solicitacao.owner_name) || "—" }),
+        elemento("td", {}, [elemento("span", {
+          class: `flow-responsavel-lista ${texto(solicitacao.owner_name) ? "atribuido" : "vazio"}`,
+          text: texto(solicitacao.owner_name) || "Sem responsável",
+        })]),
         elemento("td", {}, [
           elemento("div", { class: "flow-progresso" }, [
             elemento("div", { class: "flow-progresso-barra" }, [elemento("i", { style: `width:${proporcao}%` })]),
@@ -591,6 +594,7 @@
     const corpo = document.getElementById("painel-drawer-corpo");
     const titulo = document.getElementById("painel-drawer-titulo");
     abrirGaveta();
+    definirRodapeGaveta([]);
     Ui.carregando(corpo);
 
     const { data, error } = await Api.solicitacoes.obter(id);
@@ -603,37 +607,54 @@
     const fechada = ["concluido", "cancelado"].includes(data.status);
     const blocos = [];
 
-    // Dados do pedido
-    const dados = elemento("dl", { class: "flow-dados" });
-    const dado = (rotulo, valor, node) => {
+    const criarDados = () => elemento("dl", { class: "flow-dados" });
+    const dado = (destino, rotulo, valor, node) => {
       if (!node && !texto(valor)) return;
-      dados.append(elemento("div", { class: "flow-dado" }, [
+      destino.append(elemento("div", { class: "flow-dado" }, [
         elemento("dt", { text: rotulo }),
         elemento("dd", {}, [node || texto(valor)]),
       ]));
     };
-    dado("Status", null, seloStatus(data.status));
-    dado("Prioridade", null, Ui.seloPrioridade(data.priority)
+    const dadosPedido = criarDados();
+    dado(dadosPedido, "Tipo", data.type_label);
+    dado(dadosPedido, "Resumo", data.summary);
+    dado(dadosPedido, "Status", null, seloStatus(data.status));
+    dado(dadosPedido, "Prioridade", null, Ui.seloPrioridade(data.priority)
       || elemento("span", { text: Ui.rotuloPrioridade(data.priority || Ui.PRIORIDADE_PADRAO) }));
-    dado("Prazo", null, seloPrazo(data.due_at, fechada));
-    dado("Recebida em", dataHora(data.created_at));
-    dado("Solicitante", [data.requester_name, data.requester_area].filter(Boolean).join(" · "));
-    dado("Contato", data.requester_contact);
-    dado("Responsável", texto(data.owner_name) || "não atribuído");
-    dado("Itens", `${data.items_done} de ${data.items_total} concluído(s)`);
+    dado(dadosPedido, "Prazo", null, seloPrazo(data.due_at, fechada));
+    dado(dadosPedido, "Recebida em", dataHora(data.created_at));
+    dado(dadosPedido, "Andamento", `${data.items_done} de ${data.items_total} item(ns) concluído(s)`);
+
+    blocos.push(elemento("section", { class: "flow-card flow-ficha-secao" }, [
+      elemento("div", { class: "flow-card-head" }, [elemento("h3", { text: "Dados da solicitação" })]),
+      dadosPedido,
+    ]));
+
+    const dadosSolicitante = criarDados();
+    dado(dadosSolicitante, "Nome", data.requester_name);
+    dado(dadosSolicitante, "Área", data.requester_area || "não informada");
+    dado(dadosSolicitante, "Contato", data.requester_contact || "não informado");
+
+    blocos.push(elemento("section", { class: "flow-card flow-ficha-secao" }, [
+      elemento("div", { class: "flow-card-head" }, [elemento("h3", { text: "Dados do solicitante" })]),
+      dadosSolicitante,
+    ]));
 
     // Respostas dos campos próprios do tipo — é o que aquele pedido tinha de
     // específico e não caberia numa coluna fixa.
     const formulario = data.form_data || {};
+    const dadosEspecificos = criarDados();
     (tipo && tipo.campos ? tipo.campos : []).forEach((campo) => {
-      if (formulario[campo.field_key]) dado(campo.label, formulario[campo.field_key]);
+      if (formulario[campo.field_key]) dado(dadosEspecificos, campo.label, formulario[campo.field_key]);
     });
-    if (formulario.observacoes) dado("Observações", formulario.observacoes);
+    if (dadosEspecificos.children.length) {
+      blocos.push(elemento("section", { class: "flow-card flow-ficha-secao" }, [
+        elemento("div", { class: "flow-card-head" }, [elemento("h3", { text: "Informações específicas" })]),
+        dadosEspecificos,
+      ]));
+    }
 
-    blocos.push(elemento("section", { class: "flow-card" }, [
-      elemento("div", { class: "flow-card-head" }, [elemento("h3", { text: "Pedido" })]),
-      dados,
-    ]));
+    blocos.push(montarResponsavel(data));
 
     // Ações da operação
     blocos.push(montarAcoes(data, fechada));
@@ -642,9 +663,9 @@
     blocos.push(await montarItens(data, tipo));
 
     // Anexos
-    if ((data.anexos || []).length) {
+    {
       const lista = elemento("div", { class: "flow-itens" });
-      data.anexos.forEach((anexo) => {
+      (data.anexos || []).forEach((anexo) => {
         const extensao = texto(anexo.file_name).split(".").pop().toUpperCase();
         const itemVinculado = anexo.item_id
           ? (data.itens || []).find((item) => item.id === anexo.item_id)
@@ -678,9 +699,18 @@
           }),
         ]));
       });
-      blocos.push(elemento("section", { class: "flow-card" }, [
-        elemento("div", { class: "flow-card-head" }, [elemento("h3", { text: `Anexos (${data.anexos.length})` })]),
-        lista,
+      blocos.push(elemento("section", { class: "flow-card flow-ficha-secao" }, [
+        elemento("div", { class: "flow-card-head" }, [elemento("h3", { text: `Anexos (${(data.anexos || []).length})` })]),
+        (data.anexos || []).length
+          ? lista
+          : elemento("p", { class: "flow-ficha-vazio", text: "Nenhum anexo nesta solicitação." }),
+      ]));
+    }
+
+    if (texto(formulario.observacoes)) {
+      blocos.push(elemento("section", { class: "flow-card flow-ficha-secao" }, [
+        elemento("div", { class: "flow-card-head" }, [elemento("h3", { text: "Observações do solicitante" })]),
+        elemento("p", { class: "flow-observacao-texto", text: formulario.observacoes }),
       ]));
     }
 
@@ -688,6 +718,87 @@
     blocos.push(await montarHistorico(data));
 
     corpo.replaceChildren(...blocos);
+  }
+
+  function montarResponsavel(solicitacao) {
+    const atual = estado.equipe.find((pessoa) => pessoa.id === solicitacao.owner_profile_id);
+    const nomeAtual = texto(atual?.full_name || solicitacao.owner_name);
+    const resumo = elemento("div", { class: `flow-responsavel-atual ${nomeAtual ? "atribuido" : "vazio"}` }, [
+      elemento("span", { class: "flow-responsavel-avatar", text: nomeAtual ? nomeAtual.charAt(0).toLocaleUpperCase("pt-BR") : "—" }),
+      elemento("div", {}, [
+        elemento("strong", { text: nomeAtual || "Sem responsável" }),
+        elemento("small", { text: atual
+          ? [atual.email, atual.area].filter(Boolean).join(" · ")
+          : nomeAtual ? "Perfil anteriormente associado" : "Aguardando definição da administração" }),
+      ]),
+    ]);
+
+    const conteudo = [resumo];
+    if (Api.auth.ehAdmin()) {
+      const selecao = elemento("select", { id: "acao-responsavel", "aria-label": "Responsável da solicitação" });
+      selecao.append(elemento("option", { value: "", text: "Sem responsável" }));
+      estado.equipe.forEach((pessoa) => {
+        const opcao = elemento("option", {
+          value: pessoa.id,
+          text: [texto(pessoa.full_name), texto(pessoa.email)].filter(Boolean).join(" · "),
+        });
+        if (pessoa.id === solicitacao.owner_profile_id) opcao.selected = true;
+        selecao.append(opcao);
+      });
+      if (solicitacao.owner_profile_id && !atual) {
+        const indisponivel = elemento("option", {
+          value: solicitacao.owner_profile_id,
+          text: `${nomeAtual || "Responsável atual"} · perfil indisponível`,
+          disabled: true,
+        });
+        indisponivel.selected = true;
+        selecao.append(indisponivel);
+      }
+
+      const botao = elemento("button", {
+        class: "primary-button compact", type: "button", text: "Atualizar responsável",
+        onclick: async () => {
+          const novoId = texto(selecao.value) || null;
+          const esperado = solicitacao.owner_profile_id || null;
+          if (novoId === esperado) { avisar("O responsável já está atualizado."); return; }
+          botao.disabled = true;
+          botao.textContent = "Atualizando…";
+          const { error } = await Api.solicitacoes.definirResponsavel(solicitacao.id, novoId, esperado);
+          if (error) {
+            botao.disabled = false;
+            botao.textContent = "Atualizar responsável";
+            avisar(error, "erro");
+            if (/mudou em outra sessão/i.test(error)) abrirFicha(solicitacao.id);
+            return;
+          }
+          avisar(novoId ? "Responsável atualizado." : "Responsável removido.", "ok");
+          await abrirFicha(solicitacao.id);
+          await carregarSolicitacoes({ manterPagina: true });
+          montarIndicadores(document.getElementById("painel-indicadores"));
+        },
+      });
+      conteudo.push(elemento("div", { class: "flow-responsavel-edicao" }, [
+        elemento("label", { class: "flow-campo", for: "acao-responsavel" }, [
+          elemento("span", { text: "Definir responsável" }),
+          elemento("small", { text: "Somente pessoas ativas da equipe podem ser selecionadas." }),
+          selecao,
+        ]),
+        botao,
+      ]));
+    } else {
+      conteudo.push(elemento("p", {
+        class: "flow-permissao-nota",
+        text: "Somente administradores podem alterar o responsável.",
+      }));
+    }
+
+    return elemento("section", { class: "flow-card flow-ficha-secao flow-responsavel-card" }, [
+      elemento("div", { class: "flow-card-head" }, [
+        elemento("h3", { text: "Responsável" }),
+        elemento("p", { text: "A pessoa associada permanece visível na lista, na ficha e no histórico." }),
+      ]),
+      ...conteudo,
+    ]);
   }
 
   function montarAcoes(solicitacao, fechada) {
@@ -709,37 +820,6 @@
       }
       status.append(node);
     });
-
-    // Sugestão com os nomes da equipe, não uma lista fechada: o responsável
-    // pode ser alguém sem conta no aplicativo, e recusar esse caso seria pior
-    // do que registrá-lo. O que a tela não pode é deixar a diferença invisível
-    // — daí o aviso abaixo.
-    const sugestoes = elemento("datalist", { id: "acao-responsavel-opcoes" });
-    estado.equipe.forEach((pessoa) => {
-      sugestoes.append(elemento("option", { value: texto(pessoa.full_name) }));
-    });
-
-    const responsavel = elemento("input", {
-      id: "acao-responsavel", type: "text", autocomplete: "off",
-      list: "acao-responsavel-opcoes", placeholder: "Nome de quem executa",
-    });
-    responsavel.value = texto(solicitacao.owner_name);
-
-    const avisoResponsavel = elemento("small", {
-      id: "acao-responsavel-aviso",
-      style: "display:block;margin-top:.25rem;color:var(--warning-800)",
-    });
-    const conferirResponsavel = () => {
-      const nome = texto(responsavel.value);
-      const daEquipe = estado.equipe.some(
-        (pessoa) => texto(pessoa.full_name).toLocaleUpperCase("pt-BR") === nome.toLocaleUpperCase("pt-BR")
-      );
-      avisoResponsavel.textContent = !nome || daEquipe
-        ? ""
-        : "Esta pessoa não está na equipe do aplicativo e não receberá aviso.";
-    };
-    responsavel.addEventListener("input", conferirResponsavel);
-    conferirResponsavel();
 
     const prioridade = elemento("select", { id: "acao-prioridade" });
     Object.entries(Ui.PRIORIDADES).forEach(([valor, info]) => {
@@ -763,7 +843,6 @@
       const alteracoes = [
         ["status", status.value, solicitacao.status],
         ["priority", prioridade.value, texto(solicitacao.priority) || Ui.PRIORIDADE_PADRAO],
-        ["owner_name", responsavel.value, solicitacao.owner_name],
         ["due_at", prazo.value, solicitacao.due_at || ""],
         ["answer", resposta.value, solicitacao.answer],
       ].filter(([, novo, antigo]) => texto(novo) !== texto(antigo));
@@ -839,9 +918,14 @@
       montarArmazenamento(document.getElementById("painel-armazenamento"));
     };
 
-    return elemento("section", { class: "flow-card" }, [
+    const botaoExcluir = Api.auth.ehAdmin()
+      ? elemento("button", { class: "danger-button", type: "button", text: "Excluir solicitação", onclick: excluir })
+      : null;
+    definirRodapeGaveta([botaoSalvar, botaoReprocessar, botaoExcluir]);
+
+    return elemento("section", { class: "flow-card flow-ficha-secao" }, [
       elemento("div", { class: "flow-card-head" }, [
-        elemento("h3", { text: "Operação" }),
+        elemento("h3", { text: "Status e andamento" }),
         elemento("p", { text: "Toda alteração fica registrada no histórico, com autor e horário." }),
       ]),
       elemento("div", { class: "flow-grid" }, [
@@ -850,9 +934,6 @@
           elemento("span", { text: "Prioridade" }),
           elemento("small", { text: "Urgente e alta destacam a linha no painel e entram no cartão de urgentes." }),
           prioridade,
-        ]),
-        elemento("label", { class: "flow-campo", for: "acao-responsavel" }, [
-          elemento("span", { text: "Responsável" }), responsavel, sugestoes, avisoResponsavel,
         ]),
         elemento("label", { class: "flow-campo", for: "acao-prazo" }, [elemento("span", { text: "Prazo" }), prazo]),
         elemento("label", { class: "flow-campo larga", for: "acao-resposta" }, [
@@ -863,78 +944,85 @@
           resposta,
         ]),
       ]),
-      elemento("div", { class: "flow-acoes", style: "margin-top:.9rem" }, [
-        botaoSalvar,
-        botaoReprocessar,
-        Api.auth.ehAdmin()
-          ? elemento("button", { class: "danger-button", type: "button", text: "Excluir solicitação", onclick: excluir })
-          : null,
-      ]),
     ]);
   }
 
   async function montarItens(solicitacao, tipo) {
     const colunas = colunasDoTipo(solicitacao.type_code);
     const itens = (solicitacao.itens || []).slice().sort((a, b) => a.item_number - b.item_number);
-
-    const cabecalho = elemento("tr", {}, [
-      elemento("th", { class: "col-check", text: "#" }),
-      ...colunas.map((coluna) => elemento("th", { text: coluna.rotulo })),
-      elemento("th", { text: "Status" }),
-      elemento("th", { text: "" }),
-    ]);
-
-    const corpo = elemento("tbody");
+    const documentos = elemento("div", { class: "flow-documentos-lista" });
+    const triagens = elemento("div", { class: "flow-triagens-lista" });
     itens.forEach((item) => {
-      corpo.append(elemento("tr", {}, [
-        elemento("td", { text: String(item.item_number) }),
-        ...colunas.map((coluna) => elemento("td", {}, [coluna.celula(item, tipo)])),
-        elemento("td", {}, [seloStatus(item.status)]),
-        elemento("td", {}, [
+      documentos.append(elemento("article", { class: "flow-documento-card" }, [
+        elemento("header", {}, [
+          elemento("strong", { text: `Item ${item.item_number}` }),
+          seloStatus(item.status),
+        ]),
+        elemento("div", { class: "flow-documento-grade" }, colunas.map((coluna) =>
+          elemento("div", { class: "flow-documento-campo" }, [
+            elemento("span", { text: coluna.rotulo }),
+            elemento("div", {}, [coluna.celula(item, tipo)]),
+          ])
+        )),
+      ]));
+
+      triagens.append(elemento("article", { class: "flow-triagem-resumo" }, [
+        elemento("div", { class: "flow-triagem-resumo-identidade" }, [
+          elemento("strong", { text: item.document || item.requested_title || `Item ${item.item_number}` }),
+          elemento("span", { text: [texto(item.ld_name), texto(item.discipline)].filter(Boolean).join(" · ") || "LD ainda não identificada" }),
+          item.triaged_at ? elemento("small", { text: `Triado em ${dataHora(item.triaged_at)}` }) : null,
+        ]),
+        elemento("div", { class: "flow-triagem-resumo-estado" }, [
+          seloClassificacao(item.classification, tipo && tipo.not_found_is_expected),
+          Ui.seloFamilia(item.norm_family),
           elemento("button", {
-            class: "text-button", type: "button", text: "Detalhes",
+            class: "secondary-button compact", type: "button", text: "Ver triagem",
             onclick: () => abrirDetalheItem(item, tipo),
           }),
         ]),
       ]));
     });
 
-    return elemento("section", { class: "flow-card" }, [
-      elemento("div", { class: "flow-card-head" }, [
-        elemento("h3", { text: `Itens (${itens.length})` }),
-        elemento("p", { text: "Cada item tem status próprio. A solicitação avança conforme eles avançam." }),
+    const concluirTodos = elemento("button", {
+      class: "secondary-button compact", type: "button", text: "Concluir todos os itens",
+      disabled: itens.some((item) => item.requires_pdf_excel_pair && !(item.pdf_attachment_ready && item.excel_attachment_ready)) || null,
+      title: itens.some((item) => item.requires_pdf_excel_pair && !(item.pdf_attachment_ready && item.excel_attachment_ready))
+        ? "Complete o PDF + Excel dos itens LI/MC antes de concluir." : "",
+      onclick: async (evento) => {
+        const botaoConcluir = evento.currentTarget;
+        if (!await Ui.confirmar("Marcar todos os itens desta solicitação como concluídos?", {
+          titulo: "Concluir itens", rotuloConfirmar: "Concluir todos",
+        })) return;
+        botaoConcluir.disabled = true;
+        botaoConcluir.textContent = "Concluindo…";
+        const { error } = await Api.itens.atualizar(itens.map((i) => i.id), "status", "concluido", "Concluído em lote pela ficha");
+        if (error) {
+          botaoConcluir.disabled = false;
+          botaoConcluir.textContent = "Concluir todos os itens";
+          avisar(error, "erro");
+          return;
+        }
+        avisar("Itens concluídos.", "ok");
+        abrirFicha(solicitacao.id);
+        carregarSolicitacoes({ manterPagina: true });
+      },
+    });
+
+    return elemento("div", { class: "flow-ficha-grupo" }, [
+      elemento("section", { class: "flow-card flow-ficha-secao" }, [
+        elemento("div", { class: "flow-card-head" }, [
+          elemento("h3", { text: `Código e informações documentais (${itens.length})` }),
+          elemento("p", { text: "Os campos se reorganizam conforme a largura disponível, sem tabela horizontal." }),
+        ]),
+        itens.length ? documentos : elemento("p", { class: "flow-ficha-vazio", text: "Nenhum item documental informado." }),
+        itens.length ? elemento("div", { class: "flow-acoes flow-documentos-acoes" }, [concluirTodos]) : null,
       ]),
-      elemento("div", { class: "flow-tabela-wrap" }, [
-        elemento("table", { class: "flow-tabela" }, [elemento("thead", {}, [cabecalho]), corpo]),
-      ]),
-      elemento("div", { class: "flow-acoes", style: "margin-top:.8rem" }, [
-        elemento("button", {
-          class: "secondary-button compact", type: "button", text: "Concluir todos os itens",
-          disabled: itens.some((item) => item.requires_pdf_excel_pair && !(item.pdf_attachment_ready && item.excel_attachment_ready)) || null,
-          title: itens.some((item) => item.requires_pdf_excel_pair && !(item.pdf_attachment_ready && item.excel_attachment_ready))
-            ? "Complete o PDF + Excel dos itens LI/MC antes de concluir." : "",
-          onclick: async (evento) => {
-            // `currentTarget` é anulado assim que o manipulador cede a vez; a
-            // caixa de confirmação agora é assíncrona, então o botão é guardado
-            // antes de perguntar.
-            const botaoConcluir = evento.currentTarget;
-            if (!await Ui.confirmar("Marcar todos os itens desta solicitação como concluídos?", {
-              titulo: "Concluir itens", rotuloConfirmar: "Concluir todos",
-            })) return;
-            botaoConcluir.disabled = true;
-            botaoConcluir.textContent = "Concluindo…";
-            const { error } = await Api.itens.atualizar(itens.map((i) => i.id), "status", "concluido", "Concluído em lote pela ficha");
-            if (error) {
-              botaoConcluir.disabled = false;
-              botaoConcluir.textContent = "Concluir todos os itens";
-              avisar(error, "erro");
-              return;
-            }
-            avisar("Itens concluídos.", "ok");
-            abrirFicha(solicitacao.id);
-            carregarSolicitacoes({ manterPagina: true });
-          },
-        }),
+      elemento("section", { class: "flow-card flow-ficha-secao" }, [
+        elemento("div", { class: "flow-card-head" }, [
+          elemento("h3", { text: "Triagem nas LDs" }),
+          elemento("p", { text: "Situação de cada item, LD identificada e acesso ao resultado completo." }),
+        ]),
+        itens.length ? triagens : elemento("p", { class: "flow-ficha-vazio", text: "Não há itens para triagem." }),
       ]),
     ]);
   }
@@ -942,6 +1030,7 @@
   /** Detalhe de um item: o que a triagem viu, e o que dá para decidir agora. */
   async function abrirDetalheItem(item, tipo) {
     const corpo = document.getElementById("painel-drawer-corpo");
+    definirRodapeGaveta([]);
     Ui.carregando(corpo, "Carregando a triagem…");
 
     const { data: execucoes } = await Api.itens.historicoTriagem(item.id);
@@ -1202,9 +1291,9 @@
     const interno = elemento("input", { type: "checkbox", id: "comentario-interno" });
     interno.checked = true;
 
-    return elemento("section", { class: "flow-card" }, [
+    return elemento("section", { class: "flow-card flow-ficha-secao" }, [
       elemento("div", { class: "flow-card-head" }, [
-        elemento("h3", { text: "Comentários" }),
+        elemento("h3", { text: "Observações e comentários" }),
         elemento("p", { text: "Conversa da equipe. O que for marcado como interno o solicitante não vê." }),
       ]),
       lista,
@@ -1238,10 +1327,12 @@
       triagem_executada: "Triagem executada",
       solicitacao_alterada: "Solicitação alterada",
       item_alterado: "Item alterado",
+      responsavel_alterado: "Responsável alterado",
     };
     (data || []).forEach((evento) => {
-      const detalhe = evento.field
-        ? `${evento.field}: “${evento.old_value || "vazio"}” → “${evento.new_value || "vazio"}”`
+      const campo = evento.field === "owner_name" ? "Responsável" : evento.field;
+      const detalhe = campo
+        ? `${campo}: “${evento.old_value || "sem responsável"}” → “${evento.new_value || "sem responsável"}”`
         : evento.note;
       linha.append(elemento("div", { class: "flow-evento" }, [
         elemento("time", { text: dataHora(evento.created_at) }),
@@ -1255,7 +1346,7 @@
     if (!(data || []).length) {
       linha.append(elemento("p", { style: "color:var(--text-3);font-size:.84rem", text: "Sem eventos registrados." }));
     }
-    return elemento("section", { class: "flow-card" }, [
+    return elemento("section", { class: "flow-card flow-ficha-secao" }, [
       elemento("div", { class: "flow-card-head" }, [
         elemento("h3", { text: "Histórico" }),
         elemento("p", { text: "Tudo o que aconteceu, com autor e horário." }),
@@ -1473,6 +1564,14 @@
    */
   let focoAntesDaFicha = null;
 
+  function definirRodapeGaveta(nodes = []) {
+    const rodape = document.getElementById("painel-drawer-rodape");
+    if (!rodape) return;
+    const validos = nodes.filter(Boolean);
+    rodape.replaceChildren(...validos);
+    rodape.hidden = validos.length === 0;
+  }
+
   function abrirGaveta() {
     const gaveta = document.getElementById("painel-drawer");
     if (!gaveta) return;
@@ -1489,6 +1588,7 @@
     gaveta.classList.remove("aberto");
     document.body.classList.remove("p1-modal-open");
     estado.aberta = null;
+    definirRodapeGaveta([]);
     if (focoAntesDaFicha && focoAntesDaFicha.isConnected && typeof focoAntesDaFicha.focus === "function") {
       focoAntesDaFicha.focus();
     }
@@ -1506,9 +1606,16 @@
             elemento("h2", { id: "painel-drawer-titulo", text: "—" }),
             elemento("p", { id: "painel-drawer-sub", text: "" }),
           ]),
-          elemento("button", { class: "text-button", type: "button", text: "Fechar", onclick: fecharGaveta }),
+          elemento("button", {
+            class: "flow-drawer-fechar", type: "button", "aria-label": "Fechar ficha",
+            text: "Fechar ×", onclick: fecharGaveta,
+          }),
         ]),
         elemento("div", { class: "flow-drawer-corpo", id: "painel-drawer-corpo" }),
+        elemento("div", {
+          class: "flow-drawer-rodape", id: "painel-drawer-rodape",
+          role: "toolbar", "aria-label": "Ações principais da solicitação", hidden: true,
+        }),
       ]),
     ]);
     gaveta.addEventListener("click", (evento) => {

@@ -395,8 +395,6 @@
      "MA-5290.00-" numa linha e o resto na seguinte. */
   .flow-tabela code { font-family: var(--font-mono); font-size: .76rem; white-space: nowrap; }
   .flow-tabela td { min-width: 5rem; }
-  /* Na ficha o espaço é estreito e as colunas variam por tipo; a tabela mantém
-     a largura natural e o contêiner rola. */
   /* A lista de solicitações tem dez colunas. Sem largura mínima a tabela se
      encolhe até caber, e o navegador começa a quebrar palavra no meio
      ("Postage/m no SIGEM"). O contêiner já rola; o que faltava era a tabela
@@ -404,7 +402,6 @@
      colunas ainda cabem sem barra. */
   .flow-tabela.lista { min-width: 68rem; }
   .flow-tabela.lista td { overflow-wrap: normal; word-break: normal; }
-  .flow-drawer-corpo .flow-tabela { min-width: 46rem; }
   .flow-tabela .col-check { width: 2.2rem; }
   .flow-tabela .protocolo { font-family: var(--font-mono); font-size: .76rem; color: var(--brand-800); font-weight: 700; white-space: nowrap; }
   .flow-tabela button.protocolo { background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; }
@@ -534,17 +531,98 @@
   .flow-drawer[open], .flow-drawer.aberto { display: block; }
   .flow-drawer-painel:focus-visible { outline: none; }
   .flow-drawer-painel {
-    position: absolute; top: 0; right: 0; height: 100%; width: min(46rem, 100%);
+    position: absolute; top: 0; right: 0; height: 100dvh;
+    width: min(64rem, calc(100vw - clamp(1rem, 5vw, 4rem))); max-width: 100vw; min-width: 0;
     background: var(--surface-0); box-shadow: var(--shadow-2);
     display: flex; flex-direction: column; overflow: hidden;
   }
   .flow-drawer-head {
-    display: flex; align-items: flex-start; gap: 1rem; padding: 1rem 1.2rem;
+    flex: 0 0 auto; display: flex; align-items: flex-start; gap: 1rem; padding: 1rem 1.2rem;
     border-bottom: 1px solid var(--border-1); background: var(--surface-1);
   }
   .flow-drawer-head h2 { margin: 0 0 .15rem; font-size: 1.05rem; }
-  .flow-drawer-head p { margin: 0; font-size: .78rem; color: var(--text-3); }
-  .flow-drawer-corpo { flex: 1; overflow-y: auto; padding: 1.2rem; display: grid; gap: var(--space-5); }
+  .flow-drawer-head p { margin: 0; font-size: .78rem; color: var(--text-3); overflow-wrap: anywhere; }
+  .flow-drawer-fechar {
+    flex: 0 0 auto; min-height: 2.45rem; padding: .48rem .7rem; cursor: pointer;
+    border: 1px solid var(--border-1); border-radius: var(--radius-sm);
+    background: var(--surface-1); color: var(--text-2); font-weight: 700;
+  }
+  .flow-drawer-fechar:hover { border-color: var(--brand-600); color: var(--brand-800); }
+  .flow-drawer-corpo {
+    flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden;
+    padding: clamp(.75rem, 2vw, 1.2rem); display: grid; align-content: start; gap: var(--space-5);
+    overscroll-behavior: contain;
+  }
+  .flow-drawer-corpo > *, .flow-ficha-grupo, .flow-ficha-secao { min-width: 0; max-width: 100%; }
+  .flow-drawer-corpo > .flow-card + .flow-card { margin-top: 0; }
+  .flow-ficha-grupo { display: grid; gap: var(--space-5); }
+  .flow-ficha-grupo > .flow-card { margin-top: 0; }
+  .flow-drawer-rodape {
+    flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end;
+    gap: .55rem; flex-wrap: wrap; padding: .8rem clamp(.75rem, 2vw, 1.2rem);
+    border-top: 1px solid var(--border-1); background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+    box-shadow: 0 -8px 24px rgb(12 32 48 / 7%);
+  }
+  .flow-drawer-rodape[hidden] { display: none; }
+  .flow-drawer-rodape .danger-button { margin-right: auto; }
+
+  .flow-responsavel-lista {
+    display: inline-flex; align-items: center; max-width: 14rem; padding: .25rem .5rem;
+    border-radius: 999px; font-size: .75rem; font-weight: 700; white-space: normal; overflow-wrap: anywhere;
+  }
+  .flow-responsavel-lista.atribuido { background: var(--brand-100); color: var(--brand-800); }
+  .flow-responsavel-lista.vazio { background: var(--surface-3); color: var(--text-3); font-weight: 600; }
+  .flow-responsavel-card { border-color: color-mix(in srgb, var(--brand-600) 35%, var(--border-1)); }
+  .flow-responsavel-atual {
+    display: flex; align-items: center; gap: .75rem; min-width: 0;
+    padding: .75rem; border: 1px solid var(--border-1); border-radius: var(--radius-md); background: var(--surface-2);
+  }
+  .flow-responsavel-atual.atribuido { border-color: var(--brand-600); background: var(--brand-50); }
+  .flow-responsavel-atual > div { display: grid; min-width: 0; }
+  .flow-responsavel-atual strong, .flow-responsavel-atual small { overflow-wrap: anywhere; }
+  .flow-responsavel-atual small { color: var(--text-3); font-size: .72rem; }
+  .flow-responsavel-avatar {
+    flex: 0 0 auto; display: grid; place-items: center; width: 2.4rem; height: 2.4rem;
+    border-radius: 999px; background: var(--brand-700); color: #fff; font-weight: 800;
+  }
+  .flow-responsavel-atual.vazio .flow-responsavel-avatar { background: var(--surface-3); color: var(--text-3); }
+  .flow-responsavel-edicao {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .65rem; margin-top: .8rem;
+  }
+  .flow-permissao-nota, .flow-ficha-vazio, .flow-observacao-texto {
+    margin: .7rem 0 0; color: var(--text-3); font-size: .8rem; overflow-wrap: anywhere;
+  }
+  .flow-observacao-texto { white-space: pre-wrap; color: var(--text-2); }
+
+  .flow-documentos-lista, .flow-triagens-lista { display: grid; gap: .7rem; }
+  .flow-documento-card, .flow-triagem-resumo {
+    min-width: 0; padding: .75rem; border: 1px solid var(--border-1);
+    border-radius: var(--radius-md); background: var(--surface-2);
+  }
+  .flow-documento-card > header {
+    display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap;
+    padding-bottom: .55rem; margin-bottom: .6rem; border-bottom: 1px solid var(--border-1);
+  }
+  .flow-documento-grade {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .7rem;
+  }
+  .flow-documento-campo { min-width: 0; }
+  .flow-documento-campo > span {
+    display: block; margin-bottom: .15rem; color: var(--text-3); font-size: .66rem;
+    font-weight: 750; letter-spacing: .03em; text-transform: uppercase;
+  }
+  .flow-documento-campo > div { min-width: 0; color: var(--text-1); font-size: .8rem; overflow-wrap: anywhere; }
+  .flow-documento-campo code, .flow-drawer-corpo .flow-item code, .flow-drawer-corpo .flow-candidato code {
+    white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  }
+  .flow-documentos-acoes { margin-top: .8rem; }
+  .flow-triagem-resumo {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .75rem;
+  }
+  .flow-triagem-resumo-identidade { display: grid; min-width: 0; gap: .12rem; }
+  .flow-triagem-resumo-identidade strong, .flow-triagem-resumo-identidade span { overflow-wrap: anywhere; }
+  .flow-triagem-resumo-identidade span, .flow-triagem-resumo-identidade small { color: var(--text-3); font-size: .72rem; }
+  .flow-triagem-resumo-estado { display: flex; align-items: center; justify-content: flex-end; gap: .4rem; flex-wrap: wrap; }
 
   .flow-dados { display: grid; gap: .55rem; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
   .flow-dado { min-width: 0; }
@@ -572,6 +650,8 @@
   }
   .flow-candidato code { font-family: var(--font-mono); font-size: .76rem; }
   .flow-candidato em { font-style: normal; color: var(--text-3); display: block; font-size: .74rem; }
+  .flow-drawer-corpo .flow-candidato { min-width: 0; align-items: flex-start; flex-wrap: wrap; }
+  .flow-drawer-corpo .flow-candidato > * { min-width: 0; max-width: 100%; }
 
   /* ── Mensagens ─────────────────────────────────────────────────────────── */
   .flow-aviso {
@@ -726,6 +806,17 @@
   .flow-aba[aria-selected="true"] { color: var(--brand-800); border-bottom-color: var(--brand-700); }
 
   @media (max-width: 760px) {
+    .flow-drawer-painel { width: 100vw; max-width: 100vw; }
+    .flow-drawer-head { padding: .8rem; }
+    .flow-drawer-corpo { padding: .7rem; }
+    .flow-drawer-corpo .flow-card { padding: .85rem; }
+    .flow-drawer-rodape { justify-content: stretch; padding: .65rem .7rem; }
+    .flow-drawer-rodape > button { flex: 1 1 10rem; }
+    .flow-drawer-rodape .danger-button { margin-right: 0; }
+    .flow-responsavel-edicao, .flow-triagem-resumo { grid-template-columns: 1fr; align-items: stretch; }
+    .flow-responsavel-edicao .primary-button { width: 100%; }
+    .flow-triagem-resumo-estado { justify-content: flex-start; }
+    .flow-drawer-corpo .flow-grid { grid-template-columns: minmax(0, 1fr); }
     .flow-evento { grid-template-columns: 1fr; gap: .1rem; }
     .flow-topbar { flex-wrap: wrap; gap: .55rem; padding-inline: .8rem; }
     .flow-topbar-spacer { display: none; }
