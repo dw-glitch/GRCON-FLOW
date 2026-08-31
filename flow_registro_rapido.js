@@ -25,7 +25,6 @@
   let clientRequestId = "";
   let origemPreenchimento = "manual";
   let canalOrigem = "";
-  let entradaExterna = null;
 
   function uuid() {
     if (root.crypto && typeof root.crypto.randomUUID === "function") return root.crypto.randomUUID();
@@ -191,39 +190,6 @@
     atualizarRevisao();
   }
 
-  /**
-   * Traz o que a ponte já trouxe do Outlook. Os campos ficam destacados como
-   * preenchimento automático: quem revisa vê na hora o que veio da mensagem e
-   * o que ainda precisa escrever.
-   */
-  function preencherPelaEntrada() {
-    if (!entradaExterna) return;
-    const assunto = texto(entradaExterna.subject);
-    const corpo = texto(entradaExterna.body_text);
-    definirValor("rapido-solicitante", texto(entradaExterna.sender_name) || texto(entradaExterna.sender_email), { destaque: true });
-    definirValor("rapido-pedido", [assunto, corpo].filter(Boolean).join("\n\n").slice(0, 20000), { destaque: true });
-    const analise = Parser && typeof Parser.analisar === "function"
-      ? Parser.analisar([assunto, corpo].filter(Boolean).join("\n"), { tipos: tiposAtuais })
-      : null;
-    if (analise) {
-      if (analise.area) definirValor("rapido-area", analise.area, { destaque: true });
-      if (tipoPorCodigo(analise.tipoCodigo)) definirValor("rapido-tipo", analise.tipoCodigo, { destaque: true });
-      const documentos = [...analise.documentos, ...analise.titulos];
-      if (documentos.length) definirValor("rapido-documentos", documentos.join("\n"), { destaque: true });
-    }
-    origemPreenchimento = "integracao_outlook";
-    atualizarDocumentos();
-    atualizarRevisao();
-    const status = document.getElementById("rapido-analise-status");
-    if (status) {
-      status.className = "flow-registro-rapido-progresso ok";
-      const anexos = Number(entradaExterna.attachment_count) || 0;
-      status.textContent = anexos
-        ? `Mensagem de ${entradaExterna.sender_email}. Os ${anexos} anexo(s) originais continuam no Outlook, em GRCON Flow → Processados.`
-        : `Mensagem de ${entradaExterna.sender_email}. Revise antes de registrar.`;
-    }
-  }
-
   function fechar() {
     if (!modal || enviando) return;
     modal.remove();
@@ -300,11 +266,9 @@
       ? Docs.semRepetidos(Docs.daListaFlexivel(brutoDocumentos)).itens
       : [];
     const pedido = texto(document.getElementById("rapido-pedido")?.value);
-    const origemRotulo = origemPreenchimento === "integracao_outlook"
-      ? "Outlook pela Qualidade"
-      : origemPreenchimento === "colagem_inteligente"
-        ? "Colagem inteligente pela Qualidade"
-        : "Registro rápido pela Qualidade";
+    const origemRotulo = origemPreenchimento === "colagem_inteligente"
+      ? "Colagem inteligente pela Qualidade"
+      : "Registro rápido pela Qualidade";
     const dados = {
       tipo: tipo.code,
       nome: document.getElementById("rapido-solicitante").value,
@@ -321,12 +285,7 @@
       },
       itens,
     };
-    // A entrada externa tem caminho próprio no banco: é ela, e não o navegador,
-    // que carrega a chave idempotente. Clicar duas vezes devolve o mesmo
-    // protocolo em vez de abrir um segundo para a mesma mensagem.
-    const { data, error } = entradaExterna
-      ? await Api.entradasExternas.converter({ ...dados, entradaId: entradaExterna.id })
-      : await Api.solicitacoes.criarRapida(dados);
+    const { data, error } = await Api.solicitacoes.criarRapida(dados);
 
     if (error) {
       enviando = false;
@@ -363,7 +322,7 @@
     avisar(`${data.protocol} registrado pela Qualidade.`, "ok");
   }
 
-  function abrir({ tipos = [], aoRegistrar = null, entrada = null } = {}) {
+  function abrir({ tipos = [], aoRegistrar = null } = {}) {
     if (!Api.auth.ehEquipe()) {
       avisar("Somente a equipe da Qualidade pode usar o registro rápido.", "erro");
       return;
@@ -375,8 +334,7 @@
     enviando = false;
     clientRequestId = "";
     origemPreenchimento = "manual";
-    canalOrigem = entrada ? "outlook" : "";
-    entradaExterna = entrada;
+    canalOrigem = "";
     retornoFoco = document.activeElement;
 
     const selecaoTipo = elemento("select", { id: "rapido-tipo", required: true });
@@ -408,11 +366,6 @@
     });
     const area = elemento("input", { id: "rapido-area", type: "text", placeholder: "Área ou setor", autocomplete: "off" });
     const contato = elemento("input", { id: "rapido-contato", type: "text", placeholder: "E-mail ou ramal", autocomplete: "off" });
-    if (entradaExterna) {
-      contato.value = texto(entradaExterna.sender_email);
-      contato.readOnly = true;
-      contato.title = "O contato é o remetente original da mensagem e não pode ser trocado aqui.";
-    }
     const pedido = elemento("textarea", {
       id: "rapido-pedido", class: "flow-registro-rapido-resumo", rows: "4", required: true,
       placeholder: "Cole a mensagem recebida ou escreva um resumo objetivo.",
@@ -453,12 +406,10 @@
           elemento("div", { style: "flex:1" }, [
             elemento("h2", {
               id: "rapido-titulo",
-              text: entradaExterna ? "Revisar entrada do Outlook" : "Registrar solicitação",
+              text: "Registrar solicitação",
             }),
             elemento("p", {
-              text: entradaExterna
-                ? "A mensagem já chegou; o protocolo só nasce quando você registrar."
-                : "Cadastro rápido em nome do solicitante, com autoria preservada no histórico.",
+              text: "Cadastro rápido em nome do solicitante, com autoria preservada no histórico.",
             }),
           ]),
           elemento("button", { class: "text-button", type: "button", text: "Fechar", onclick: fechar }),
@@ -528,7 +479,6 @@
     document.body.append(modal);
     desenharArquivos();
     atualizarRevisao();
-    preencherPelaEntrada();
     colagem.focus();
   }
 

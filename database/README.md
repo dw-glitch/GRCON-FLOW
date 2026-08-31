@@ -36,11 +36,7 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_40_staff_quick_registration` | Permite registro compacto em nome do solicitante somente para a equipe da Qualidade |
 | `flow_41_quick_registration_phase_2` | Adiciona colagem inteligente local e favoritos pessoais protegidos por RLS |
 | `flow_42_quick_template_type_index` | Indexa a relação entre favoritos e tipos para manter operações rápidas |
-| `flow_43_external_inbox_phase_3` | Cria a fila de entradas externas, retira os favoritos e faz da conversão um ato humano e idempotente |
-| `flow_44_external_inbox_review_index` | Indexa a auditoria da revisão para a manutenção de contas não varrer a fila |
 | `flow_45_admin_request_owner` | Restringe responsável a perfis ativos da equipe, exclusivo da administração, com concorrência e histórico |
-| `flow_46_outlook_local_bridge` | Dá credencial própria a cada computador, permite revogar pelo painel e limpa o texto antigo em lotes |
-| `flow_47_outlook_bridge_created_by_index` | Indexa a conta que ativou a ponte, pelo mesmo motivo da flow_44 |
 
 ## Tabelas
 
@@ -56,8 +52,6 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_comments` | Conversa da equipe; `internal` esconde do solicitante. |
 | `flow_attachments` | Arquivos da solicitação (bucket `flow-anexos`). |
 | `flow_notifications` | Avisos persistentes para a equipe e para a pessoa responsável. |
-| `flow_external_inbox` | Mensagens trazidas do Outlook aguardando revisão. Só a equipe lê; escrever é só por RPC. |
-| `flow_external_webhook_secrets` | Uma linha por computador conectado. Guarda o hash do segredo, nunca o segredo. |
 | `flow_lds` | As LDs cadastradas (LD_001, LD_004, Comissionamento…). |
 | `flow_ld_versions` | Cada revisão publicada, ativa ou não. |
 | `flow_ld_documents` | Documentos indexados de cada versão. É a base das consultas. |

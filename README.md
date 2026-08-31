@@ -46,10 +46,6 @@ pedidos recebidos por Teams, Outlook, telefone ou conversa. A Fase 2 organiza
 uma mensagem colada, sugere solicitante, contato, área, tipo e documentos, mas
 nunca registra sem revisão.
 
-**Entradas externas** é a fila que a ponte do Outlook alimenta. Ela aparece só
-para a equipe da Qualidade e é, de propósito, uma fila de revisão e não uma
-caixa de e-mail: nenhuma mensagem vira solicitação sozinha.
-
 **Responsável é uma pessoa, não um nome digitado.** A ficha sugere os nomes da
 equipe ativa, e o banco resolve o nome escolhido em `owner_profile_id`, com
 chave estrangeira de verdade — é o que permite avisar quem executa. O campo
@@ -282,45 +278,6 @@ histórico. Revisões pré-cadastradas aceitam o vínculo posterior do PDF sem c
 duplicidade, e o arquivo controlado pode ser aberto pelo painel. Na N-1710, o
 texto principal e os anexos A–G aparecem separadamente porque cada parte possui
 seu próprio ciclo de revisão.
-
----
-
-## E-mail entra pelo Outlook, não por integração paga
-
-Você arrasta e-mails para a pasta `GRCON Flow` do Outlook clássico e eles
-aparecem em **Painel → Entradas externas**. Sem Power Automate Premium, sem
-registro de aplicativo no Microsoft Entra e sem depender de autorização da TI.
-
-```text
-Pasta GRCON Flow no Outlook  →  Ponte local no Windows  →  HTTPS do Supabase  →  Entradas externas
-```
-
-Uma ponte em PowerShell (em [`ponte-outlook/`](ponte-outlook/README.md)) varre a
-pasta a cada minuto e envia até 100 mensagens por lote ao endpoint
-`flow-external-intake`. E-mails aceitos vão para `Processados`; inválidos, para
-`Erros`.
-
-A varredura é periódica de propósito: o evento instantâneo do Outlook pode
-perder itens quando muitos e-mails são arrastados de uma vez. E nada é movido
-enquanto a pasta está sendo lida, senão o laço pula mensagens justamente no caso
-em que a pessoa arrastou várias juntas.
-
-**Chegar não é registrar.** A entrada fica como rascunho até alguém da Qualidade
-abrir, conferir e clicar em registrar. O contato da solicitação é sempre o
-remetente original — o banco recusa qualquer outro. Reenviar a mesma mensagem
-não cria uma segunda entrada nem um segundo protocolo: a chave é a própria
-mensagem, conferida no servidor.
-
-**O anexo não entra no banco.** Vão só nome, tamanho e quantidade; o arquivo
-continua no Outlook, em `Processados`. O texto do corpo é limitado a 20 mil
-caracteres e, 90 dias depois da revisão, é apagado em lotes pequenos — a
-rastreabilidade fica, o conteúdo sai.
-
-**Cada computador tem a própria credencial.** O segredo é gerado na instalação,
-criptografado pelo Windows e nunca sai da máquina; o servidor guarda apenas a
-verificação dele. Um administrador ativa a ponte colando o código de pareamento
-no painel, vê ali a última sincronização de cada computador e pode revogar
-qualquer um sem afetar os demais.
 
 ---
 

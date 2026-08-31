@@ -1941,7 +1941,6 @@
 
   const ABAS = [
     { chave: "solicitacoes", rotulo: "Solicitações", titulo: "Solicitações" },
-    { chave: "entradas", rotulo: "Entradas externas", titulo: "Entradas externas", equipe: true },
     { chave: "lds", rotulo: "Base de LDs", titulo: "Base de LDs", admin: true },
     { chave: "normas", rotulo: "Normas e códigos", titulo: "Normas e códigos", admin: true },
     { chave: "tipos", rotulo: "Tipos de solicitação", titulo: "Tipos de solicitação", admin: true },
@@ -1956,7 +1955,6 @@
     const conhecida = ABAS.find((aba) => aba.chave === pedida);
     if (!conhecida) return "solicitacoes";
     if (conhecida.admin && !Api.auth.ehAdmin()) return "solicitacoes";
-    if (conhecida.equipe && !Api.auth.ehEquipe()) return "solicitacoes";
     return conhecida.chave;
   }
 
@@ -1983,7 +1981,6 @@
     if (titulo && aba) titulo.textContent = aba.titulo;
 
     pararAtualizacaoArmazenamento();
-    if (root.FlowEntradas) root.FlowEntradas.desmontar();
     if (estado.aba === "solicitacoes") {
       const blocos = [
         elemento("div", { id: "painel-indicadores", class: "flow-indicadores" }),
@@ -2001,12 +1998,6 @@
         iniciarAtualizacaoArmazenamento();
       }
       desenharTabela();
-    } else if (estado.aba === "entradas") {
-      root.FlowEntradas.montar(conteudo, {
-        tipos: estado.tipos,
-        aoConverter: aposRegistro,
-        aoMudar: atualizarPendentesDeEntradas,
-      });
     } else if (estado.aba === "lds") {
       root.FlowLd.montar(conteudo);
     } else if (estado.aba === "normas") {
@@ -2027,8 +2018,7 @@
     renderAba();
   }
 
-  /** Leva de volta à lista e abre o protocolo recém-criado, venha ele do
-   *  registro rápido ou da revisão de uma entrada externa. */
+  /** Leva de volta à lista e abre o protocolo recém-criado. */
   async function aposRegistro(resultado) {
     if (estado.aba !== "solicitacoes") {
       estado.aba = "solicitacoes";
@@ -2039,19 +2029,6 @@
     const indicadores = document.getElementById("painel-indicadores");
     if (indicadores) montarIndicadores(indicadores);
     if (resultado && resultado.id) abrirSolicitacao(resultado.id);
-    atualizarPendentesDeEntradas();
-  }
-
-  async function atualizarPendentesDeEntradas() {
-    if (!Api.auth.ehEquipe()) return;
-    const botao = document.querySelector('[data-aba="entradas"]');
-    if (!botao) return;
-    const { total } = await Api.entradasExternas.pendentes();
-    const anterior = botao.querySelector(".flow-aba-contador");
-    if (anterior) anterior.remove();
-    if (!total) return;
-    botao.append(elemento("span", { class: "flow-aba-contador", text: String(total) }));
-    botao.setAttribute("aria-label", `Entradas externas: ${total} aguardando revisão`);
   }
 
   function montarPagina() {
@@ -2068,7 +2045,7 @@
         }),
       }) : null;
     const abas = elemento("div", { class: "flow-abas", role: "tablist" },
-      ABAS.filter((aba) => (!aba.admin || admin) && (!aba.equipe || Api.auth.ehEquipe())).map((aba) => elemento("button", {
+      ABAS.filter((aba) => !aba.admin || admin).map((aba) => elemento("button", {
         class: "flow-aba", type: "button", role: "tab", "data-aba": aba.chave,
         "aria-selected": aba.chave === estado.aba ? "true" : "false",
         text: aba.rotulo,
@@ -2098,7 +2075,6 @@
       Ui.montarRodape()
     );
     renderAba();
-    atualizarPendentesDeEntradas();
     // Abrir direto em outra aba não deve custar uma consulta de solicitações
     // que ninguém vai ver.
     if (estado.aba === "solicitacoes") carregarSolicitacoes();

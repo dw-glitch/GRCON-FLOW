@@ -805,49 +805,6 @@
   .flow-aba:hover { color: var(--brand-800); }
   .flow-aba[aria-selected="true"] { color: var(--brand-800); border-bottom-color: var(--brand-700); }
 
-  .flow-aba-contador {
-    display: inline-grid; place-items: center; min-width: 1.35rem; height: 1.35rem;
-    margin-left: .4rem; padding: 0 .3rem; border-radius: 999px;
-    background: var(--brand-700); color: #fff; font-size: .72rem; font-variant-numeric: tabular-nums;
-  }
-
-  /* ── Entradas externas (ponte do Outlook) ──────────────────────────────── */
-  .flow-entradas { display: grid; gap: var(--space-4); }
-  .flow-entradas-filtros { align-items: end; }
-  .flow-entrada {
-    background: var(--surface-1); border: 1px solid var(--border-1);
-    border-left: 3px solid var(--brand-600); border-radius: var(--radius-md);
-    padding: clamp(.8rem, 2vw, 1.1rem); display: grid; gap: .6rem;
-  }
-  .flow-entrada-head { display: flex; align-items: start; justify-content: space-between; gap: .75rem; }
-  .flow-entrada-head strong { font-size: .96rem; color: var(--brand-strong); overflow-wrap: anywhere; }
-  .flow-entrada-remetente { margin: .15rem 0 0; font-size: .78rem; color: var(--text-3); overflow-wrap: anywhere; }
-  .flow-entrada-trecho {
-    margin: 0; font-size: .84rem; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere;
-  }
-  .flow-entrada-nota { margin: 0; font-size: .76rem; color: var(--text-3); }
-  .flow-entrada-selo {
-    flex: 0 0 auto; padding: .2rem .6rem; border-radius: 999px;
-    font-size: .72rem; font-weight: 650; letter-spacing: .02em;
-    background: var(--brand-100); color: var(--brand-800);
-  }
-  /* A cor acompanha o rótulo; ela nunca é o único recado. */
-  .flow-entrada-selo.convertida { background: var(--success-100); color: var(--success-700); }
-  .flow-entrada-selo.descartada { background: var(--surface-3); color: var(--text-3); }
-  .flow-entrada-selo.erro { background: var(--danger-100); color: var(--danger-700); }
-  .flow-entradas-paginacao {
-    display: flex; align-items: center; justify-content: center; gap: .6rem;
-    margin-top: var(--space-4); font-size: .82rem; color: var(--text-3); flex-wrap: wrap;
-  }
-
-  .flow-pontes { display: grid; gap: .6rem; margin-bottom: var(--space-4); }
-  .flow-ponte {
-    border: 1px solid var(--border-1); border-radius: var(--radius-md);
-    padding: .7rem .85rem; display: grid; gap: .5rem; background: var(--surface-1);
-  }
-  .flow-ponte.revogada { opacity: .65; }
-  .flow-ponte strong { font-size: .9rem; color: var(--brand-strong); }
-
   @media (max-width: 760px) {
     .flow-drawer-painel { width: 100vw; max-width: 100vw; }
     .flow-drawer-head { padding: .8rem; }
@@ -861,8 +818,6 @@
     .flow-triagem-resumo-estado { justify-content: flex-start; }
     .flow-drawer-corpo .flow-grid { grid-template-columns: minmax(0, 1fr); }
     .flow-evento { grid-template-columns: 1fr; gap: .1rem; }
-    .flow-entrada-head { flex-direction: column; align-items: stretch; }
-    .flow-entrada-selo { justify-self: start; width: fit-content; }
     .flow-topbar { flex-wrap: wrap; gap: .55rem; padding-inline: .8rem; }
     .flow-topbar-spacer { display: none; }
     .flow-topbar nav { order: 3; width: 100%; display: grid; grid-template-columns: repeat(2, 1fr); }
