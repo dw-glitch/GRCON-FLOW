@@ -1090,23 +1090,19 @@ check("códigos repetidos na mensagem saem uma vez e com a primeira grafia", () 
   assert.deepEqual(resultado.documentos, [codigo]);
 });
 
-check("favoritos rápidos são pessoais, pequenos e inacessíveis ao anônimo", () => {
+check("os favoritos saíram do cliente junto com a tabela que a flow_43 removeu", () => {
   const migration = fs.readFileSync(
-    path.join(root, "database/migrations/flow_41_quick_registration_phase_2.sql"), "utf8"
+    path.join(root, "database/migrations/flow_43_external_inbox_phase_3.sql"), "utf8"
   );
-  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
-  assert.match(migration, /create table if not exists public\.flow_quick_templates/i);
-  assert.match(migration, /alter table public\.flow_quick_templates enable row level security/i);
-  assert.match(migration, /\(select auth\.uid\(\)\) = owner_id/i);
-  assert.match(migration, /\(select public\.flow_is_staff\(\)\)/i);
-  assert.match(migration, /revoke all on table public\.flow_quick_templates from public, anon, authenticated/i);
-  assert.match(migration, /grant select, insert, update, delete on table public\.flow_quick_templates to authenticated/i);
-  assert.match(migration, />= 20/);
-  assert.match(migration, /security invoker/i);
-  assert.match(api, /client\.from\("flow_quick_templates"\)/);
-  const bloco = api.match(/const modelosRapidos = \{[\s\S]*?\n  \};\n\n  \/\/ -+\n  \/\/ Solicitações/)[0];
-  assert.doesNotMatch(bloco, /requester_name|requester_contact|document|attachment|arquivo/i,
-    "favorito não guarda pessoa, código ou arquivo de uma solicitação anterior");
+  // A migração recusa apagar um favorito que alguém tenha criado no intervalo
+  // entre a conferência e a aplicação: perder o dado seria pior que falhar.
+  assert.match(migration, /raise exception 'Existem favoritos salvos/);
+  assert.match(migration, /drop table if exists public\.flow_quick_templates cascade/);
+  for (const arquivo of ["flow_api.js", "flow_registro_rapido.js"]) {
+    const fonte = fs.readFileSync(path.join(root, arquivo), "utf8");
+    assert.doesNotMatch(fonte, /flow_quick_templates|modelosRapidos|favorito/i,
+      `${arquivo} ainda chama uma tabela que não existe mais no banco`);
+  }
 });
 
 check("a Fase 2 sempre leva a pessoa por análise, revisão e registro explícito", () => {
@@ -1117,14 +1113,11 @@ check("a Fase 2 sempre leva a pessoa por análise, revisão e registro explícit
     "o analisador precisa carregar antes do modal");
   assert.match(rapido, /id: "rapido-analisar"/);
   assert.match(rapido, /id: "rapido-revisao"/);
-  assert.match(rapido, /pedido\.value = favorito \? atual\.request_text \|\| "" : ""/,
-    "um favorito novo não pode copiar o pedido real que está no formulário");
-  assert.match(rapido, /Retire nomes, contatos e códigos específicos do texto-base/);
   assert.match(rapido, /text: "Registrar", onclick: registrar/,
     "analisar não pode substituir o ato explícito de registrar");
   assert.doesNotMatch(parser, /fetch\(|XMLHttpRequest|\.rpc\(|\.from\(/,
     "o texto colado precisa ser tratado localmente, sem serviço externo");
-  const envio = rapido.match(/const \{ data, error \} = await Api\.solicitacoes\.criarRapida\([\s\S]*?\n    \}\);/)[0];
+  const envio = rapido.match(/const dados = \{[\s\S]*?\n    \};/)[0];
   assert.doesNotMatch(envio, /rapido-colagem/,
     "a mensagem bruta não deve ser persistida junto com a solicitação");
 });
@@ -1714,6 +1707,184 @@ check("o Controle Oficial continua com as mesmas 26 colunas", () => {
   assert.equal(cabecalhos.length, 26, "a planilha oficial tem 26 colunas");
   assert.ok(!cabecalhos.some((c) => /PRIORIDADE/i.test(String(c))),
     "prioridade não pode aparecer no Controle Oficial");
+});
+
+check("a caixa de entradas externas é da Qualidade e fechada ao resto", () => {
+  const migration = fs.readFileSync(
+    path.join(root, "database/migrations/flow_43_external_inbox_phase_3.sql"), "utf8"
+  );
+  assert.match(migration, /alter table public\.flow_external_inbox enable row level security/i);
+  assert.match(migration, /revoke all on table public\.flow_external_inbox from public, anon, authenticated/i);
+  assert.match(migration, /using \(\(select public\.flow_is_staff\(\)\)\)/i,
+    "só a equipe pode ler a fila");
+  // O navegador lê; escrever é só por RPC. Um UPDATE direto pularia a auditoria.
+  assert.match(migration, /grant select on table public\.flow_external_inbox to authenticated/i);
+  assert.doesNotMatch(migration, /grant (insert|update|delete)[^;]*flow_external_inbox to authenticated/i);
+  // O segredo do webhook nunca é gravado em texto puro nem exposto ao cliente.
+  assert.match(migration, /secret_hash text not null check \(secret_hash ~ '\^\[0-9a-f\]\{64\}\$'\)/);
+  assert.match(migration, /revoke all on table public\.flow_external_webhook_secrets from public, anon, authenticated/i);
+});
+
+check("nenhuma mensagem vira protocolo sem uma pessoa registrar", () => {
+  const migration = fs.readFileSync(
+    path.join(root, "database/migrations/flow_43_external_inbox_phase_3.sql"), "utf8"
+  );
+  const funcao = fs.readFileSync(
+    path.join(root, "supabase/functions/flow-external-intake/index.ts"), "utf8"
+  );
+  // A função de recebimento grava a entrada e nada mais: sem protocolo, sem
+  // triagem, sem anexo. É isso que a mantém curta o bastante para não estourar
+  // o tempo do lote.
+  assert.doesNotMatch(funcao, /flow_create_request|flow_create_staff_request|flow_convert_external_inbox/,
+    "a entrada externa não pode criar solicitação");
+  assert.match(migration, /status text not null default 'novo'/);
+  // A conversão trava a linha, devolve o mesmo recibo se já houver protocolo e
+  // exige que o contato seja o remetente original.
+  assert.match(migration, /where id = p_inbox_id\s*\n\s*for update/i);
+  assert.match(migration, /if entrada\.request_id is not null then\s*\n\s*return public\.flow_request_receipt/i);
+  assert.match(migration, /contato <> entrada\.sender_email/);
+});
+
+check("a ponte se identifica por computador e o servidor confere de novo", () => {
+  const funcao = fs.readFileSync(
+    path.join(root, "supabase/functions/flow-external-intake/index.ts"), "utf8"
+  );
+  const migration = fs.readFileSync(
+    path.join(root, "database/migrations/flow_46_outlook_local_bridge.sql"), "utf8"
+  );
+  assert.match(funcao, /req\.method !== "POST"/, "o endpoint aceita apenas POST");
+  assert.match(funcao, /x-grcon-flow-bridge-id/);
+  assert.match(funcao, /x-grcon-flow-secret/);
+  assert.match(funcao, /safeEqual\(providedHash/, "a comparação do segredo é de tempo constante");
+  // Esconder o botão no painel é conforto; a barreira é o servidor conferir se
+  // o e-mail continua sendo de um perfil ativo da Qualidade.
+  assert.match(funcao, /STAFF_ROLES = \["operador", "administrador", "proprietario"\]/);
+  assert.match(funcao, /submitter_not_authorized/);
+  assert.match(migration, /p\.role in \('operador', 'administrador', 'proprietario'\)/);
+  assert.match(migration, /ator_role not in \('administrador', 'proprietario'\)/,
+    "ativar uma ponte é ato da administração");
+});
+
+check("o lote é limitado por quantidade, por tamanho e por reenvio", () => {
+  const funcao = fs.readFileSync(
+    path.join(root, "supabase/functions/flow-external-intake/index.ts"), "utf8"
+  );
+  const ponte = fs.readFileSync(path.join(root, "ponte-outlook/GrconFlowPonte.ps1"), "utf8");
+  assert.match(funcao, /const MAX_BATCH = 100;/);
+  assert.match(funcao, /const MAX_BODY_BYTES = 2_500_000;/);
+  assert.match(funcao, /const MAX_MESSAGE_CHARS = 20_000;/);
+  assert.match(funcao, /onConflict: "source,external_id", ignoreDuplicates: true/,
+    "reenviar a mesma mensagem não pode criar uma segunda entrada");
+  // A ponte precisa caber dentro dos mesmos limites, ou o lote volta com 413.
+  assert.match(ponte, /\$MAX_POR_LOTE = 100/);
+  assert.ok(Number(ponte.match(/\$MAX_BYTES_LOTE = (\d+)/)[1]) <= 2500000,
+    "o lote da ponte não pode passar do teto do servidor");
+  assert.match(ponte, /\$MAX_CARACTERES_CORPO = 20000/);
+});
+
+check("a ponte não perde e-mail e não mexe em nada além da pasta monitorada", () => {
+  const ponte = fs.readFileSync(path.join(root, "ponte-outlook/GrconFlowPonte.ps1"), "utf8");
+  const instalar = fs.readFileSync(path.join(root, "ponte-outlook/Instalar.ps1"), "utf8");
+  const desinstalar = fs.readFileSync(path.join(root, "ponte-outlook/Desinstalar.ps1"), "utf8");
+  // Mover durante a iteração faz o laço pular itens justamente quando alguém
+  // arrasta muitos e-mails de uma vez.
+  assert.match(ponte, /Primeiro colhe, depois move/);
+  assert.match(ponte, /GetActiveObject\('Outlook\.Application'\)/,
+    "a ponte usa a sessão aberta, não inicia uma segunda");
+  assert.doesNotMatch(ponte, /\.Send\(\)|CreateItem|MailItem\.Send/,
+    "a ponte nunca envia e-mail");
+  assert.match(ponte, /New-Object System\.Threading\.Mutex/, "uma execução por vez");
+  // Sem confirmação do servidor, nada sai da pasta.
+  assert.match(ponte, /envio_falhou: \{0\} mensagem\(ns\) permanecem na pasta/);
+  // O log é operacional: nunca assunto, corpo, remetente ou credencial.
+  assert.doesNotMatch(ponte, /Write-Registro[^\n]*\$(item|entrada)\.(Subject|Body|SenderName|sender_email)/i);
+  assert.doesNotMatch(instalar + desinstalar + ponte, /ExecutionPolicy Bypass/,
+    "contornar a política da empresa não é opção");
+  // Instalar não pode apagar automações de Outlook que já existam na máquina.
+  assert.match(instalar, /Get-ScheduledTask -TaskName \$NOME_DA_TAREFA/);
+  assert.match(desinstalar, /Get-ScheduledTask -TaskName \$NOME_DA_TAREFA/);
+  assert.match(instalar, /já existe uma ponte instalada/);
+});
+
+check("o segredo da ponte fica no Windows; o servidor guarda só a verificação", () => {
+  const instalar = fs.readFileSync(path.join(root, "ponte-outlook/Instalar.ps1"), "utf8");
+  const ponte = fs.readFileSync(path.join(root, "ponte-outlook/GrconFlowPonte.ps1"), "utf8");
+  const entradas = fs.readFileSync(path.join(root, "flow_entradas.js"), "utf8");
+  assert.match(instalar, /ConvertFrom-SecureString/, "o segredo é protegido pelo DPAPI");
+  assert.match(instalar, /SHA256/, "o servidor recebe apenas o hash");
+  assert.match(instalar, /\$segredo = \$null/, "o segredo não fica na memória do instalador");
+  assert.doesNotMatch(instalar.match(/\[ordered\]@\{[\s\S]*?\} \| ConvertTo-Json \| Set-Content/)[0], /segredo|secret(?!_hash)/,
+    "a configuração gravada em disco não pode conter o segredo");
+  assert.match(ponte, /A configuração não pode conter o segredo/);
+  // O código colado no painel é conferido antes de sair do navegador.
+  assert.match(entradas, /Esse texto contém o segredo da ponte/);
+});
+
+check("a fila de entradas é da equipe e some da barra para quem não é", () => {
+  const painel = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  const html = fs.readFileSync(path.join(root, "painel.html"), "utf8");
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  assert.match(painel, /chave: "entradas".*equipe: true/,
+    "a aba é da equipe da Qualidade");
+  assert.match(painel, /conhecida\.equipe && !Api\.auth\.ehEquipe\(\)/,
+    "um endereço direto não pode furar a restrição");
+  assert.match(painel, /!aba\.equipe \|\| Api\.auth\.ehEquipe\(\)/,
+    "a aba não deve nem aparecer para quem não é da equipe");
+  assert.match(html, /flow_entradas\.js/);
+  assert.match(html, /flow_registro_rapido\.js[\s\S]*flow_entradas\.js[\s\S]*flow_painel\.js/,
+    "a ordem de carga precisa respeitar as dependências");
+  assert.match(api, /entradasExternas, pontesOutlook,/);
+});
+
+check("revisar uma entrada preserva o remetente como contato da solicitação", () => {
+  const rapido = fs.readFileSync(path.join(root, "flow_registro_rapido.js"), "utf8");
+  const entradas = fs.readFileSync(path.join(root, "flow_entradas.js"), "utf8");
+  // O banco recusa contato diferente do remetente; deixar o campo editável só
+  // produziria um erro no envio.
+  assert.match(rapido, /contato\.readOnly = true/);
+  assert.match(rapido, /Api\.entradasExternas\.converter\(\{ \.\.\.dados, entradaId: entradaExterna\.id \}\)/);
+  assert.match(rapido, /origemPreenchimento = "integracao_outlook"/);
+  // Sem Microsoft Graph não há link para a mensagem: dizer onde ela está é mais
+  // honesto que oferecer um botão que não abriria nada.
+  assert.match(entradas, /GRCON Flow → Processados/);
+  assert.match(entradas, /Revisar e registrar/);
+});
+
+check("o texto antigo é apagado em lotes pequenos, sem travar o recebimento", () => {
+  const migration = fs.readFileSync(
+    path.join(root, "database/migrations/flow_46_outlook_local_bridge.sql"), "utf8"
+  );
+  const funcao = fs.readFileSync(
+    path.join(root, "supabase/functions/flow-external-intake/index.ts"), "utf8"
+  );
+  assert.match(migration, /for update skip locked/i,
+    "a limpeza não pode disputar linha com a chegada de um lote");
+  assert.match(migration, /limit least\(greatest\(coalesce\(p_limit, 200\), 1\), 500\)/);
+  assert.match(migration, /grant execute on function public\.flow_redact_external_inbox_batch\(timestamptz,integer\)\s*\n\s*to service_role/i);
+  assert.match(funcao, /90 \* 24 \* 60 \* 60 \* 1000/, "a retenção do texto é de 90 dias");
+  // A rastreabilidade sobrevive à limpeza: só o corpo sai.
+  assert.match(migration, /set body_text = '',\s*\n\s*body_redacted_at = now\(\)/);
+});
+
+check("as migrações da Fase 3 estão versionadas na ordem em que foram aplicadas", () => {
+  const esperadas = [
+    "flow_43_external_inbox_phase_3",
+    "flow_44_external_inbox_review_index",
+    "flow_46_outlook_local_bridge",
+    "flow_47_outlook_bridge_created_by_index",
+  ];
+  const readme = fs.readFileSync(path.join(root, "database/README.md"), "utf8");
+  for (const nome of esperadas) {
+    assert.ok(fs.existsSync(path.join(root, `database/migrations/${nome}.sql`)),
+      `${nome}.sql precisa estar no repositório`);
+    assert.ok(readme.includes(nome), `${nome} precisa estar documentada`);
+  }
+  // Os índices existem porque as duas FKs usam ON DELETE SET NULL: sem eles,
+  // remover uma conta percorreria a fila inteira.
+  const quarentaESete = fs.readFileSync(
+    path.join(root, "database/migrations/flow_47_outlook_bridge_created_by_index.sql"), "utf8"
+  );
+  assert.match(quarentaESete, /flow_external_webhook_secrets_created_by_idx/);
 });
 
 console.log(JSON.stringify({ app: "GRCON Flow", passou: true, testes: checks.length, nomes: checks }, null, 2));

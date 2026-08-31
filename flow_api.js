@@ -186,10 +186,6 @@
     if (/Selecione um usuário ativo da equipe como responsável|não possui nome cadastrado/i.test(bruto)) {
       return "Selecione um usuário ativo da equipe como responsável.";
     }
-    if (/flow_quick_templates_owner_name_uidx|duplicate key.*flow_quick_templates/i.test(bruto)) {
-      return "Já existe um favorito com esse nome.";
-    }
-    if (/Você pode manter até 20 favoritos/i.test(bruto)) return "Você pode manter até 20 favoritos.";
     if (/LI\/MC.*N-1710|PDF e o Excel|PDF \+ Excel|PDF obrigatório|Excel obrigatório/i.test(bruto)) return bruto;
     if (/Limite de \d+ anexos complementares/i.test(bruto)) {
       return `Esta solicitação já tem o limite de ${MAXIMO_ANEXOS} anexos complementares.`;
@@ -420,69 +416,6 @@
 
     async removerCampo(id) {
       return chamar(client.from("flow_type_fields").delete().eq("id", id), "remover campo");
-    },
-  };
-
-  // ---------------------------------------------------------------------------
-  // Modelos pessoais do Registro rápido
-  // ---------------------------------------------------------------------------
-  const modelosRapidos = {
-    limite: 20,
-
-    async listar() {
-      if (!auth.ehEquipe()) return { data: [], error: "Somente a equipe da Qualidade pode usar modelos rápidos." };
-      const retorno = await chamar(
-        client.from("flow_quick_templates")
-          .select("id,name,type_code,requester_area,request_text,sort_order,created_at,updated_at")
-          .order("sort_order", { ascending: true })
-          .order("created_at", { ascending: true })
-          .limit(20),
-        "carregar modelos rápidos"
-      );
-      return { data: retorno.data || [], error: retorno.error };
-    },
-
-    async salvar(modelo) {
-      if (!auth.ehEquipe()) return { data: null, error: "Somente a equipe da Qualidade pode salvar modelos rápidos." };
-      const registro = {
-        name: texto(modelo && modelo.name).slice(0, 60),
-        type_code: texto(modelo && modelo.type_code),
-        requester_area: texto(modelo && modelo.requester_area).slice(0, 120),
-        request_text: texto(modelo && modelo.request_text).slice(0, 2000),
-        sort_order: Math.max(0, Number(modelo && modelo.sort_order) || 0),
-        updated_at: new Date().toISOString(),
-      };
-      if (!registro.name) return { data: null, error: "Dê um nome ao favorito." };
-      if (!registro.type_code) return { data: null, error: "Escolha o tipo do favorito." };
-      const consulta = modelo && modelo.id
-        ? client.from("flow_quick_templates").update(registro).eq("id", modelo.id).select().single()
-        : client.from("flow_quick_templates").insert(registro).select().single();
-      return chamar(consulta, modelo && modelo.id ? "atualizar modelo rápido" : "salvar modelo rápido");
-    },
-
-    async excluir(id) {
-      if (!auth.ehEquipe()) return { error: "Somente a equipe da Qualidade pode excluir modelos rápidos." };
-      if (!texto(id)) return { error: "Modelo inválido." };
-      const { error } = await chamar(
-        client.from("flow_quick_templates").delete().eq("id", id),
-        "excluir modelo rápido"
-      );
-      return { error };
-    },
-
-    async reordenar(modelos) {
-      if (!auth.ehEquipe()) return { error: "Somente a equipe da Qualidade pode reorganizar modelos rápidos." };
-      const lista = (modelos || []).filter((modelo) => texto(modelo && modelo.id));
-      for (let indice = 0; indice < lista.length; indice += 1) {
-        const { error } = await chamar(
-          client.from("flow_quick_templates")
-            .update({ sort_order: indice, updated_at: new Date().toISOString() })
-            .eq("id", lista[indice].id),
-          "reorganizar modelos rápidos"
-        );
-        if (error) return { error };
-      }
-      return { error: null };
     },
   };
 
@@ -1523,9 +1456,178 @@
     },
   };
 
+  // ---------------------------------------------------------------------------
+  // Entradas externas — Fase 3
+  // ---------------------------------------------------------------------------
+
+  // A ponte do Outlook entrega mensagens; ela não cria protocolo. Tudo o que
+  // chega fica aqui como rascunho até alguém da Qualidade revisar e registrar.
+  // Por isso a leitura é ampla para a equipe e toda escrita passa por RPC.
+  const SITUACOES_DA_ENTRADA = Object.freeze([
+    { valor: "novo", rotulo: "Novas" },
+    { valor: "em_revisao", rotulo: "Em revisão" },
+    { valor: "convertido", rotulo: "Convertidas" },
+    { valor: "descartado", rotulo: "Descartadas" },
+    { valor: "erro", rotulo: "Com erro" },
+  ]);
+
+  const COLUNAS_DA_ENTRADA = [
+    "id", "source", "external_id", "sender_name", "sender_email", "subject",
+    "body_text", "received_at", "submitted_by_email", "message_url",
+    "attachment_count", "attachment_metadata", "status", "request_id",
+    "reviewed_at", "discarded_reason", "body_redacted_at", "created_at",
+    "solicitacao:flow_requests(protocol,status)",
+  ].join(",");
+
+  const entradasExternas = {
+    porPagina: 25,
+    situacoes: SITUACOES_DA_ENTRADA,
+
+    /**
+     * Uma página do recorte, com o total do servidor. O filtro é aplicado no
+     * PostgREST porque a fila pode crescer bem além do que cabe na tela.
+     */
+    async listar({ status = "novo", busca = "", pagina = 1 } = {}) {
+      if (!auth.ehEquipe()) {
+        return { data: [], total: 0, error: "Somente a equipe da Qualidade pode ver as entradas externas." };
+      }
+      const inicio = Math.max(0, (Number(pagina) || 1) - 1) * entradasExternas.porPagina;
+      let consulta = client.from("flow_external_inbox")
+        .select(COLUNAS_DA_ENTRADA, { count: "exact" })
+        .order("received_at", { ascending: false })
+        .range(inicio, inicio + entradasExternas.porPagina - 1);
+      if (status) consulta = consulta.eq("status", status);
+      const termo = texto(busca);
+      if (termo) {
+        const escapado = termo.replace(/[%,()]/g, " ").trim();
+        if (escapado) {
+          consulta = consulta.or(
+            `subject.ilike.%${escapado}%,sender_name.ilike.%${escapado}%,sender_email.ilike.%${escapado}%`
+          );
+        }
+      }
+      return chamarComTotal(consulta, "carregar entradas externas");
+    },
+
+    /** Só o número, para o contador da aba não puxar a fila inteira. */
+    async pendentes() {
+      if (!auth.ehEquipe()) return { total: 0, error: null };
+      const { count, error } = await client.from("flow_external_inbox")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["novo", "em_revisao"]);
+      if (error) return { total: 0, error: traduzErro(error, "contar entradas pendentes") };
+      return { total: Number(count) || 0, error: null };
+    },
+
+    /** Descartar é ato auditável: a RPC grava autor, horário e motivo. */
+    async descartar(id, motivo = "") {
+      if (!auth.ehEquipe()) return { data: null, error: "Somente a equipe da Qualidade pode descartar entradas." };
+      return chamar(
+        client.rpc("flow_discard_external_inbox", {
+          p_inbox_id: texto(id),
+          p_reason: texto(motivo).slice(0, 500),
+        }),
+        "descartar entrada externa"
+      );
+    },
+
+    /**
+     * Converte a entrada em solicitação. A idempotência é do banco: a própria
+     * entrada é a chave, então repetir o clique devolve o mesmo protocolo em
+     * vez de abrir um segundo.
+     */
+    async converter(dados) {
+      if (!auth.ehEquipe()) {
+        return { data: null, error: "Somente a equipe da Qualidade pode converter entradas externas." };
+      }
+      const retorno = await chamar(
+        client.rpc("flow_convert_external_inbox", {
+          p_inbox_id: texto(dados.entradaId),
+          p_type_code: dados.tipo,
+          p_requester_name: texto(dados.nome),
+          p_requester_area: texto(dados.area),
+          p_requester_contact: texto(dados.contato),
+          p_summary: texto(dados.resumo),
+          p_description: texto(dados.descricao),
+          p_form_data: dados.formulario || {},
+          p_items: dados.itens || [],
+        }),
+        "converter entrada externa em solicitação"
+      );
+      if (retorno.data && retorno.data.triage_completed && retorno.data.id) {
+        triadasNoServidor.add(retorno.data.id);
+      }
+      return retorno;
+    },
+
+    /** Enquanto o painel estiver aberto, um lote novo aparece sozinho. */
+    observar(fn) {
+      if (!state.session || !auth.ehEquipe() || typeof fn !== "function") return () => {};
+      const sufixo = state.session.user.id || Math.random().toString(36).slice(2);
+      const canal = client.channel(`flow-entradas-${sufixo}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "flow_external_inbox" }, fn)
+        .subscribe();
+      return () => { client.removeChannel(canal); };
+    },
+  };
+
+  // ---------------------------------------------------------------------------
+  // Pontes locais do Outlook
+  // ---------------------------------------------------------------------------
+
+  // O segredo da ponte nasce e morre no Windows. O painel só vê o identificador,
+  // o e-mail vinculado e a última atividade — nunca o segredo nem o hash.
+  const pontesOutlook = {
+    async listar() {
+      if (!auth.ehAdmin()) {
+        return { data: [], error: "Somente administradores podem ver as pontes do Outlook." };
+      }
+      const retorno = await chamar(client.rpc("flow_list_outlook_bridges"), "listar pontes do Outlook");
+      return { data: retorno.data || [], error: retorno.error };
+    },
+
+    /**
+     * O instalador produz o par identificador + hash; o painel só o transporta.
+     * Um hash fora do formato é recusado aqui e de novo no banco.
+     */
+    async registrar({ bridgeId, hash, email, rotulo = "" } = {}) {
+      if (!auth.ehAdmin()) {
+        return { data: null, error: "Somente administradores podem ativar a ponte do Outlook." };
+      }
+      const identificador = texto(bridgeId).toLowerCase();
+      const digest = texto(hash).toLowerCase();
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(identificador)) {
+        return { data: null, error: "Código de pareamento inválido: identificador da ponte fora do formato." };
+      }
+      if (!/^[0-9a-f]{64}$/.test(digest)) {
+        return { data: null, error: "Código de pareamento inválido: verificação fora do formato." };
+      }
+      return chamar(
+        client.rpc("flow_register_outlook_bridge", {
+          p_bridge_id: identificador,
+          p_secret_hash: digest,
+          p_submitted_by_email: texto(email).toLowerCase(),
+          p_label: texto(rotulo).slice(0, 120),
+        }),
+        "ativar ponte do Outlook"
+      );
+    },
+
+    async revogar(bridgeId) {
+      if (!auth.ehAdmin()) {
+        return { data: null, error: "Somente administradores podem revogar a ponte do Outlook." };
+      }
+      return chamar(
+        client.rpc("flow_revoke_outlook_bridge", { p_bridge_id: texto(bridgeId) }),
+        "revogar ponte do Outlook"
+      );
+    },
+  };
+
   root.FlowApi = Object.freeze({
-    client, config, auth, tipos, modelosRapidos, solicitacoes, itens, triagem, lds, normas,
+    client, config, auth, tipos, solicitacoes, itens, triagem, lds, normas,
     comentarios, anexos, armazenamento, historico, notificacoes, usuarios, acesso, exportacao,
+    entradasExternas, pontesOutlook,
     ORDENS_DE_SOLICITACAO,
   });
 })(window);
