@@ -23,11 +23,9 @@
   let arquivos = [];
   let enviando = false;
   let clientRequestId = "";
-  let favoritos = [];
-  let gerenciandoFavoritos = false;
   let origemPreenchimento = "manual";
   let canalOrigem = "";
-  let favoritoAplicadoId = "";
+  let entradaExterna = null;
 
   function uuid() {
     if (root.crypto && typeof root.crypto.randomUUID === "function") return root.crypto.randomUUID();
@@ -127,7 +125,6 @@
     );
     origemPreenchimento = "colagem_inteligente";
     canalOrigem = resultado.canal || "texto";
-    favoritoAplicadoId = "";
     atualizarDocumentos();
     atualizarRevisao();
     const status = document.getElementById("rapido-analise-status");
@@ -194,190 +191,37 @@
     atualizarRevisao();
   }
 
-  function fecharEditorFavorito() {
-    const editor = document.getElementById("rapido-favorito-editor");
-    if (!editor) return;
-    editor.hidden = true;
-    editor.replaceChildren();
-  }
-
-  function aplicarFavorito(favorito) {
-    const tipo = tipoPorCodigo(favorito && favorito.type_code);
-    if (!tipo) {
-      avisar("O tipo deste favorito está inativo. Edite o favorito antes de usar.", "erro");
-      return;
+  /**
+   * Traz o que a ponte já trouxe do Outlook. Os campos ficam destacados como
+   * preenchimento automático: quem revisa vê na hora o que veio da mensagem e
+   * o que ainda precisa escrever.
+   */
+  function preencherPelaEntrada() {
+    if (!entradaExterna) return;
+    const assunto = texto(entradaExterna.subject);
+    const corpo = texto(entradaExterna.body_text);
+    definirValor("rapido-solicitante", texto(entradaExterna.sender_name) || texto(entradaExterna.sender_email), { destaque: true });
+    definirValor("rapido-pedido", [assunto, corpo].filter(Boolean).join("\n\n").slice(0, 20000), { destaque: true });
+    const analise = Parser && typeof Parser.analisar === "function"
+      ? Parser.analisar([assunto, corpo].filter(Boolean).join("\n"), { tipos: tiposAtuais })
+      : null;
+    if (analise) {
+      if (analise.area) definirValor("rapido-area", analise.area, { destaque: true });
+      if (tipoPorCodigo(analise.tipoCodigo)) definirValor("rapido-tipo", analise.tipoCodigo, { destaque: true });
+      const documentos = [...analise.documentos, ...analise.titulos];
+      if (documentos.length) definirValor("rapido-documentos", documentos.join("\n"), { destaque: true });
     }
-    definirValor("rapido-tipo", tipo.code, { destaque: true });
-    definirValor("rapido-area", favorito.requester_area || "", { destaque: true });
-    definirValor("rapido-pedido", favorito.request_text || "", { destaque: true });
-    origemPreenchimento = "modelo_favorito";
-    canalOrigem = "";
-    favoritoAplicadoId = favorito.id || "";
+    origemPreenchimento = "integracao_outlook";
     atualizarDocumentos();
     atualizarRevisao();
     const status = document.getElementById("rapido-analise-status");
     if (status) {
       status.className = "flow-registro-rapido-progresso ok";
-      status.textContent = `Favorito “${favorito.name}” aplicado. Informe o solicitante e revise o pedido.`;
+      const anexos = Number(entradaExterna.attachment_count) || 0;
+      status.textContent = anexos
+        ? `Mensagem de ${entradaExterna.sender_email}. Os ${anexos} anexo(s) originais continuam no Outlook, em GRCON Flow → Processados.`
+        : `Mensagem de ${entradaExterna.sender_email}. Revise antes de registrar.`;
     }
-    const solicitante = document.getElementById("rapido-solicitante");
-    if (solicitante) solicitante.focus();
-  }
-
-  function abrirEditorFavorito(favorito = null) {
-    const editor = document.getElementById("rapido-favorito-editor");
-    if (!editor) return;
-    const atual = favorito || {};
-    const nome = elemento("input", {
-      id: "rapido-favorito-nome", type: "text", maxlength: "60", autocomplete: "off",
-      value: atual.name || "", placeholder: "Ex.: Postagem no SIGEM",
-    });
-    const selecao = elemento("select", { id: "rapido-favorito-tipo", required: true });
-    selecao.append(elemento("option", { value: "", text: "Selecione…" }));
-    tiposAtuais.forEach((tipo) => selecao.append(elemento("option", {
-      value: tipo.code, text: tipo.label,
-    })));
-    selecao.value = atual.type_code || texto(document.getElementById("rapido-tipo")?.value);
-    const area = elemento("input", {
-      id: "rapido-favorito-area", type: "text", maxlength: "120", autocomplete: "off",
-      value: favorito ? atual.requester_area || "" : texto(document.getElementById("rapido-area")?.value),
-      placeholder: "Opcional",
-    });
-    const pedido = elemento("textarea", {
-      id: "rapido-favorito-pedido", rows: "3", maxlength: "2000",
-      placeholder: "Texto-base opcional, sem nome, contato ou códigos específicos.",
-    });
-    // Um novo favorito começa sem copiar o pedido atual. Isso impede que nome,
-    // contato ou código de uma solicitação real sejam reaproveitados por engano.
-    pedido.value = favorito ? atual.request_text || "" : "";
-    const status = elemento("p", { class: "flow-registro-rapido-progresso", role: "status", "aria-live": "polite" });
-    const salvar = elemento("button", {
-      class: "primary-button compact", type: "button", text: favorito ? "Salvar alterações" : "Salvar favorito",
-      onclick: async () => {
-        if (!texto(nome.value)) { status.className = "flow-registro-rapido-progresso erro"; status.textContent = "Dê um nome ao favorito."; nome.focus(); return; }
-        if (!texto(selecao.value)) { status.className = "flow-registro-rapido-progresso erro"; status.textContent = "Escolha o tipo do favorito."; selecao.focus(); return; }
-        const conteudoModelo = Parser && typeof Parser.analisar === "function"
-          ? Parser.analisar(pedido.value, { tipos: tiposAtuais })
-          : { nome: "", contato: "", documentos: [] };
-        if (conteudoModelo.nome || conteudoModelo.contato || conteudoModelo.documentos.length) {
-          status.className = "flow-registro-rapido-progresso erro";
-          status.textContent = "Retire nomes, contatos e códigos específicos do texto-base.";
-          pedido.focus();
-          return;
-        }
-        salvar.disabled = true;
-        salvar.textContent = "Salvando…";
-        const retorno = await Api.modelosRapidos.salvar({
-          id: atual.id,
-          name: nome.value,
-          type_code: selecao.value,
-          requester_area: area.value,
-          request_text: pedido.value,
-          sort_order: favorito ? atual.sort_order : favoritos.length,
-        });
-        salvar.disabled = false;
-        salvar.textContent = favorito ? "Salvar alterações" : "Salvar favorito";
-        if (retorno.error) {
-          status.className = "flow-registro-rapido-progresso erro";
-          status.textContent = retorno.error;
-          return;
-        }
-        fecharEditorFavorito();
-        await carregarFavoritos();
-        avisar(favorito ? "Favorito atualizado." : "Favorito salvo.", "ok");
-      },
-    });
-    editor.hidden = false;
-    editor.replaceChildren(
-      elemento("div", { class: "flow-registro-rapido-editor-head" }, [
-        elemento("strong", { text: favorito ? "Editar favorito" : "Novo favorito" }),
-        elemento("button", { class: "text-button", type: "button", text: "Fechar", onclick: fecharEditorFavorito }),
-      ]),
-      elemento("div", { class: "flow-grid" }, [
-        campo("rapido-favorito-nome", "Nome", nome, { obrigatorio: true }),
-        campo("rapido-favorito-tipo", "Tipo", selecao, { obrigatorio: true }),
-        campo("rapido-favorito-area", "Área padrão", area),
-      ]),
-      campo("rapido-favorito-pedido", "Texto-base", pedido, {
-        largo: true, ajuda: "Solicitante, contato, documentos e anexos nunca são salvos no favorito.",
-      }),
-      status,
-      elemento("div", { class: "flow-acoes" }, [salvar])
-    );
-    nome.focus();
-  }
-
-  async function excluirFavorito(favorito) {
-    const confirmou = await Ui.confirmar(`Excluir o favorito “${favorito.name}”?`, {
-      titulo: "Excluir favorito", rotuloConfirmar: "Excluir", perigo: true,
-      ajuda: "Somente o modelo será apagado. Solicitações já registradas não serão alteradas.",
-    });
-    if (!confirmou) return;
-    const { error } = await Api.modelosRapidos.excluir(favorito.id);
-    if (error) { avisar(error, "erro"); return; }
-    await carregarFavoritos();
-    avisar("Favorito excluído.", "ok");
-  }
-
-  async function moverFavorito(indice, deslocamento) {
-    const destino = indice + deslocamento;
-    if (destino < 0 || destino >= favoritos.length) return;
-    const anterior = favoritos.slice();
-    [favoritos[indice], favoritos[destino]] = [favoritos[destino], favoritos[indice]];
-    desenharFavoritos();
-    const { error } = await Api.modelosRapidos.reordenar(favoritos);
-    if (error) {
-      favoritos = anterior;
-      desenharFavoritos();
-      avisar(error, "erro");
-    }
-  }
-
-  function desenharFavoritos() {
-    const destino = document.getElementById("rapido-favoritos-lista");
-    const gerenciar = document.getElementById("rapido-favoritos-gerenciar");
-    const salvar = document.getElementById("rapido-favoritos-salvar");
-    if (!destino) return;
-    if (gerenciar) {
-      gerenciar.hidden = !favoritos.length;
-      gerenciar.textContent = gerenciandoFavoritos ? "Concluir" : "Gerenciar";
-      gerenciar.setAttribute("aria-pressed", gerenciandoFavoritos ? "true" : "false");
-    }
-    if (salvar) salvar.disabled = favoritos.length >= (Api.modelosRapidos.limite || 20);
-    if (!favoritos.length) {
-      destino.replaceChildren(elemento("span", { class: "flow-registro-rapido-vazio", text: "Nenhum favorito salvo." }));
-      return;
-    }
-    destino.replaceChildren(...favoritos.map((favorito, indice) => elemento("div", {
-      class: "flow-registro-rapido-favorito",
-    }, [
-      elemento("button", {
-        class: "flow-registro-rapido-favorito-aplicar", type: "button",
-        text: favorito.name, title: `Usar ${favorito.name}`,
-        onclick: () => aplicarFavorito(favorito),
-      }),
-      elemento("span", { text: tipoPorCodigo(favorito.type_code)?.label || "Tipo inativo" }),
-      gerenciandoFavoritos ? elemento("div", { class: "flow-registro-rapido-favorito-acoes" }, [
-        elemento("button", { class: "text-button", type: "button", text: "↑", title: "Mover para cima", disabled: indice === 0, onclick: () => moverFavorito(indice, -1) }),
-        elemento("button", { class: "text-button", type: "button", text: "↓", title: "Mover para baixo", disabled: indice === favoritos.length - 1, onclick: () => moverFavorito(indice, 1) }),
-        elemento("button", { class: "text-button", type: "button", text: "Editar", onclick: () => abrirEditorFavorito(favorito) }),
-        elemento("button", { class: "text-button danger", type: "button", text: "Excluir", onclick: () => excluirFavorito(favorito) }),
-      ]) : null,
-    ])));
-  }
-
-  async function carregarFavoritos() {
-    const destino = document.getElementById("rapido-favoritos-lista");
-    if (destino) destino.replaceChildren(elemento("span", { class: "flow-registro-rapido-vazio", text: "Carregando favoritos…" }));
-    const { data, error } = await Api.modelosRapidos.listar();
-    if (!modal) return;
-    if (error) {
-      favoritos = [];
-      if (destino) destino.replaceChildren(elemento("span", { class: "flow-registro-rapido-vazio erro", text: error }));
-      return;
-    }
-    favoritos = data || [];
-    desenharFavoritos();
   }
 
   function fechar() {
@@ -456,12 +300,12 @@
       ? Docs.semRepetidos(Docs.daListaFlexivel(brutoDocumentos)).itens
       : [];
     const pedido = texto(document.getElementById("rapido-pedido")?.value);
-    const origemRotulo = origemPreenchimento === "colagem_inteligente"
-      ? "Colagem inteligente pela Qualidade"
-      : origemPreenchimento === "modelo_favorito"
-        ? "Modelo favorito pela Qualidade"
+    const origemRotulo = origemPreenchimento === "integracao_outlook"
+      ? "Outlook pela Qualidade"
+      : origemPreenchimento === "colagem_inteligente"
+        ? "Colagem inteligente pela Qualidade"
         : "Registro rápido pela Qualidade";
-    const { data, error } = await Api.solicitacoes.criarRapida({
+    const dados = {
       tipo: tipo.code,
       nome: document.getElementById("rapido-solicitante").value,
       area: document.getElementById("rapido-area").value,
@@ -473,11 +317,16 @@
         origem_registro: origemRotulo,
         origem_preenchimento: origemPreenchimento,
         canal_origem: canalOrigem,
-        modelo_rapido_id: favoritoAplicadoId,
         _client_request_id: clientRequestId,
       },
       itens,
-    });
+    };
+    // A entrada externa tem caminho próprio no banco: é ela, e não o navegador,
+    // que carrega a chave idempotente. Clicar duas vezes devolve o mesmo
+    // protocolo em vez de abrir um segundo para a mesma mensagem.
+    const { data, error } = entradaExterna
+      ? await Api.entradasExternas.converter({ ...dados, entradaId: entradaExterna.id })
+      : await Api.solicitacoes.criarRapida(dados);
 
     if (error) {
       enviando = false;
@@ -514,7 +363,7 @@
     avisar(`${data.protocol} registrado pela Qualidade.`, "ok");
   }
 
-  function abrir({ tipos = [], aoRegistrar = null } = {}) {
+  function abrir({ tipos = [], aoRegistrar = null, entrada = null } = {}) {
     if (!Api.auth.ehEquipe()) {
       avisar("Somente a equipe da Qualidade pode usar o registro rápido.", "erro");
       return;
@@ -525,11 +374,9 @@
     arquivos = [];
     enviando = false;
     clientRequestId = "";
-    favoritos = [];
-    gerenciandoFavoritos = false;
     origemPreenchimento = "manual";
-    canalOrigem = "";
-    favoritoAplicadoId = "";
+    canalOrigem = entrada ? "outlook" : "";
+    entradaExterna = entrada;
     retornoFoco = document.activeElement;
 
     const selecaoTipo = elemento("select", { id: "rapido-tipo", required: true });
@@ -561,6 +408,11 @@
     });
     const area = elemento("input", { id: "rapido-area", type: "text", placeholder: "Área ou setor", autocomplete: "off" });
     const contato = elemento("input", { id: "rapido-contato", type: "text", placeholder: "E-mail ou ramal", autocomplete: "off" });
+    if (entradaExterna) {
+      contato.value = texto(entradaExterna.sender_email);
+      contato.readOnly = true;
+      contato.title = "O contato é o remetente original da mensagem e não pode ser trocado aqui.";
+    }
     const pedido = elemento("textarea", {
       id: "rapido-pedido", class: "flow-registro-rapido-resumo", rows: "4", required: true,
       placeholder: "Cole a mensagem recebida ou escreva um resumo objetivo.",
@@ -585,15 +437,6 @@
     });
     selecaoTipo.addEventListener("change", () => selecaoTipo.classList.remove("flow-preenchido-inteligente"));
 
-    const botaoSalvarFavorito = elemento("button", {
-      id: "rapido-favoritos-salvar", class: "text-button", type: "button", text: "+ Novo favorito",
-      onclick: () => abrirEditorFavorito(),
-    });
-    const botaoGerenciarFavoritos = elemento("button", {
-      id: "rapido-favoritos-gerenciar", class: "text-button", type: "button", text: "Gerenciar", hidden: true,
-      onclick: () => { gerenciandoFavoritos = !gerenciandoFavoritos; fecharEditorFavorito(); desenharFavoritos(); },
-    });
-
     const botaoFechar = elemento("button", {
       id: "rapido-cancelar", class: "secondary-button", type: "button", text: "Cancelar", onclick: fechar,
     });
@@ -608,8 +451,15 @@
       elemento("section", { class: "flow-modal-painel" }, [
         elemento("header", { class: "flow-modal-head" }, [
           elemento("div", { style: "flex:1" }, [
-            elemento("h2", { id: "rapido-titulo", text: "Registrar solicitação" }),
-            elemento("p", { text: "Cadastro rápido em nome do solicitante, com autoria preservada no histórico." }),
+            elemento("h2", {
+              id: "rapido-titulo",
+              text: entradaExterna ? "Revisar entrada do Outlook" : "Registrar solicitação",
+            }),
+            elemento("p", {
+              text: entradaExterna
+                ? "A mensagem já chegou; o protocolo só nasce quando você registrar."
+                : "Cadastro rápido em nome do solicitante, com autoria preservada no histórico.",
+            }),
           ]),
           elemento("button", { class: "text-button", type: "button", text: "Fechar", onclick: fechar }),
         ]),
@@ -627,14 +477,6 @@
                 role: "status", "aria-live": "polite",
               }),
             ]),
-          ]),
-          elemento("section", { class: "flow-registro-rapido-favoritos", "aria-labelledby": "rapido-favoritos-titulo" }, [
-            elemento("div", { class: "flow-registro-rapido-favoritos-head" }, [
-              elemento("strong", { id: "rapido-favoritos-titulo", text: "Meus favoritos" }),
-              elemento("div", { class: "flow-acoes" }, [botaoSalvarFavorito, botaoGerenciarFavoritos]),
-            ]),
-            elemento("div", { id: "rapido-favoritos-lista", class: "flow-registro-rapido-favoritos-lista" }),
-            elemento("div", { id: "rapido-favorito-editor", class: "flow-registro-rapido-favorito-editor", hidden: true }),
           ]),
           elemento("div", { class: "flow-grid" }, [
             campo("rapido-tipo", "Tipo", selecaoTipo, { obrigatorio: true }),
@@ -686,7 +528,7 @@
     document.body.append(modal);
     desenharArquivos();
     atualizarRevisao();
-    carregarFavoritos();
+    preencherPelaEntrada();
     colagem.focus();
   }
 
