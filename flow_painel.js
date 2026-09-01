@@ -1941,6 +1941,7 @@
 
   const ABAS = [
     { chave: "solicitacoes", rotulo: "Solicitações", titulo: "Solicitações" },
+    { chave: "outlook", rotulo: "Importar do Outlook", titulo: "Importar do Outlook" },
     { chave: "lds", rotulo: "Base de LDs", titulo: "Base de LDs", admin: true },
     { chave: "normas", rotulo: "Normas e códigos", titulo: "Normas e códigos", admin: true },
     { chave: "tipos", rotulo: "Tipos de solicitação", titulo: "Tipos de solicitação", admin: true },
@@ -2008,6 +2009,15 @@
       root.FlowAdmin.montarUsuarios(conteudo);
     } else if (estado.aba === "acesso") {
       root.FlowAdmin.montarAcesso(conteudo);
+    } else if (estado.aba === "outlook") {
+      if (!root.FlowOutlookSync) {
+        conteudo.replaceChildren(elemento("div", { class: "flow-vazio" }, [
+          elemento("strong", { text: "Importação do Outlook indisponível" }),
+          elemento("p", { text: "Recarregue a página para concluir a atualização do GRCON Flow." }),
+        ]));
+      } else {
+        root.FlowOutlookSync.montar(conteudo, { tipos: estado.tipos, aoRegistrar: aposRegistro });
+      }
     }
   }
 

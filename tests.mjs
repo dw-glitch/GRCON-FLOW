@@ -1729,4 +1729,41 @@ check("a ponte local da Fase 3 foi removida sem afetar o Registro rápido", () =
     "o Registro rápido manual precisa continuar disponível");
 });
 
+check("a importação do Outlook é assistida pelo OneDrive e aparece no painel", () => {
+  const painel = fs.readFileSync(path.join(root, "painel.html"), "utf8");
+  const controlador = fs.readFileSync(path.join(root, "flow_painel.js"), "utf8");
+  const importador = fs.readFileSync(path.join(root, "flow_outlook_sync.js"), "utf8");
+  assert.match(painel, /flow_outlook_sync\.js/);
+  assert.match(controlador, /chave: "outlook"/);
+  assert.match(controlador, /FlowOutlookSync\.montar/);
+  assert.match(importador, /showDirectoryPicker/,
+    "a pasta deve ser escolhida pela pessoa, sem caminho corporativo fixo no código");
+  assert.match(importador, /indexedDB/,
+    "o navegador deve lembrar somente o identificador autorizado da pasta");
+  assert.match(importador, /Nada entra no painel sem sua confirmação/);
+});
+
+check("pacotes incompletos não entram e a repetição não duplica protocolo", () => {
+  const importador = fs.readFileSync(path.join(root, "flow_outlook_sync.js"), "utf8");
+  assert.match(importador, /const ARQUIVO_PRONTO = "pronto\.json"/);
+  assert.match(importador, /if \(!await arquivoDaPasta\(pasta, ARQUIVO_PRONTO\)\) return null/);
+  assert.match(importador, /const ARQUIVO_IMPORTADO = "importado\.json"/);
+  assert.match(importador, /uuidDeterministico\(`outlook:\$\{pacote\.dados\.externalId\}`\)/);
+  assert.match(importador, /_client_request_id: clientRequestId/);
+  assert.match(importador, /status: "enviando_anexos"/,
+    "o protocolo deve ser marcado antes do primeiro anexo para permitir retomada");
+  assert.match(importador, /Api\.solicitacoes\.obter\(marcador\.request_id\)/);
+});
+
+check("o fluxo documentado usa somente conectores padrão e nunca apaga e-mail", () => {
+  const guia = fs.readFileSync(path.join(root, "power-automate/README.md"), "utf8");
+  assert.match(guia, /Get emails \(V3\)/);
+  assert.match(guia, /OneDrive for Business/);
+  assert.match(guia, /Move email \(V2\)/);
+  assert.match(guia, /pronto\.json/);
+  assert.match(guia, /Controle de simultaneidade: ativado, grau `1`/);
+  assert.doesNotMatch(guia, /\.ps1|Invoke-WebRequest|flow-external-intake/i);
+  assert.match(guia, /nunca apaga mensagens/i);
+});
+
 console.log(JSON.stringify({ app: "GRCON Flow", passou: true, testes: checks.length, nomes: checks }, null, 2));

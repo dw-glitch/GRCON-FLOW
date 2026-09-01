@@ -46,6 +46,23 @@ pedidos recebidos por Teams, Outlook, telefone ou conversa. A Fase 2 organiza
 uma mensagem colada, sugere solicitante, contato, área, tipo e documentos, mas
 nunca registra sem revisão.
 
+### Outlook clássico + Power Automate + OneDrive
+
+A aba **Importar do Outlook** recebe, sem conector Premium e sem programa local,
+os e-mails que a equipe move deliberadamente para uma pasta da caixa
+compartilhada. Um fluxo agendado do Power Automate copia metadados e anexos para
+uma fila sincronizada pelo OneDrive e move a mensagem para **Processados**. O
+GRCON Flow lê essa pasta somente depois de a pessoa autorizá-la no navegador.
+
+O registro continua assistido: remetente, tipo, pedido, documentos e anexos são
+mostrados para revisão. Ao confirmar, a mesma RPC protegida do Registro rápido
+cria o protocolo, envia os arquivos e executa a triagem nas LDs. A chave
+derivada do identificador do e-mail torna a repetição idempotente, e o arquivo
+`importado.json` gravado na pasta guarda o protocolo e permite retomar anexos
+sem duplicar o pedido.
+
+O contrato e a montagem do fluxo estão em [`power-automate/README.md`](power-automate/README.md).
+
 **Responsável é uma pessoa, não um nome digitado.** A ficha sugere os nomes da
 equipe ativa, e o banco resolve o nome escolhido em `owner_profile_id`, com
 chave estrangeira de verdade — é o que permite avisar quem executa. O campo
