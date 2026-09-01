@@ -1747,6 +1747,10 @@ check("pacotes incompletos não entram e a repetição não duplica protocolo", 
   const importador = fs.readFileSync(path.join(root, "flow_outlook_sync.js"), "utf8");
   assert.match(importador, /const ARQUIVO_PRONTO = "pronto\.json"/);
   assert.match(importador, /if \(!await arquivoDaPasta\(pasta, ARQUIVO_PRONTO\)\) return null/);
+  assert.match(importador, /carregarPacotePlano/,
+    "a fila plana precisa funcionar quando o OneDrive não oferece criação de subpasta");
+  assert.match(importador, /MARCADOR_ANEXO/,
+    "os anexos planos devem ser agrupados pelo prefixo do pacote");
   assert.match(importador, /const ARQUIVO_IMPORTADO = "importado\.json"/);
   assert.match(importador, /uuidDeterministico\(`outlook:\$\{pacote\.dados\.externalId\}`\)/);
   assert.match(importador, /_client_request_id: clientRequestId/);

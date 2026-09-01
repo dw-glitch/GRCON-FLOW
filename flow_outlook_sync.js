@@ -1,7 +1,10 @@
 /**
  * GRCON Flow — importação assistida de e-mails preparados pelo Power Automate.
  *
- * O Power Automate salva cada mensagem numa pasta sincronizada pelo OneDrive.
+ * O Power Automate salva cada mensagem numa fila sincronizada pelo OneDrive.
+ * O formato preferencial usa arquivos planos com o mesmo prefixo de pacote,
+ * pois o conector padrão do OneDrive for Business não cria subpastas. O leitor
+ * também continua aceitando o formato antigo em subpastas.
  * Nada é enviado diretamente do Microsoft 365 ao Supabase: a equipe abre o
  * painel, revisa os dados e confirma o registro. O navegador lê e grava apenas
  * a pasta escolhida pela pessoa, mediante a File System Access API.
@@ -22,6 +25,8 @@
   const ARQUIVO_MENSAGEM = "mensagem.json";
   const ARQUIVO_PRONTO = "pronto.json";
   const ARQUIVO_IMPORTADO = "importado.json";
+  const SEPARADOR_PACOTE = "__";
+  const MARCADOR_ANEXO = `${SEPARADOR_PACOTE}anexo${SEPARADOR_PACOTE}`;
   const EXTENSOES_IGNORADAS = new Set(["json", "tmp", "ini"]);
 
   let destinoAtual = null;
@@ -167,6 +172,16 @@
     } catch (_) { return null; }
   }
 
+  function nomePlano(prefixo, nome) { return `${prefixo}${SEPARADOR_PACOTE}${nome}`; }
+
+  function arquivoComNome(arquivo, nome) {
+    if (!arquivo || arquivo.name === nome || typeof root.File !== "function") return arquivo;
+    return new root.File([arquivo], nome, {
+      type: arquivo.type || "application/octet-stream",
+      lastModified: arquivo.lastModified || Date.now(),
+    });
+  }
+
   async function anexosDaPasta(pasta) {
     const encontrados = [];
     for await (const [nome, handle] of pasta.entries()) {
@@ -175,6 +190,20 @@
       if ([ARQUIVO_MENSAGEM, ARQUIVO_PRONTO, ARQUIVO_IMPORTADO].includes(nome.toLowerCase())) continue;
       if (EXTENSOES_IGNORADAS.has(extensao)) continue;
       try { encontrados.push(await handle.getFile()); } catch (_) { /* arquivo ainda sincronizando */ }
+    }
+    encontrados.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    return encontrados;
+  }
+
+  async function anexosPlanos(pasta, prefixo) {
+    const encontrados = [];
+    const inicio = `${prefixo}${MARCADOR_ANEXO}`;
+    for await (const [nome, handle] of pasta.entries()) {
+      if (!handle || handle.kind !== "file" || !nome.startsWith(inicio)) continue;
+      const nomeOriginal = nome.slice(inicio.length);
+      const extensao = nomeOriginal.toLowerCase().split(".").pop();
+      if (!nomeOriginal || EXTENSOES_IGNORADAS.has(extensao)) continue;
+      try { encontrados.push(arquivoComNome(await handle.getFile(), nomeOriginal)); } catch (_) { /* sincronização em curso */ }
     }
     encontrados.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
     return encontrados;
@@ -197,14 +226,40 @@
     const anexos = await anexosDaPasta(pasta);
     const dados = normalizarMensagem(mensagem, nome);
     dados.documentos = [...new Set([...dados.documentos, ...documentosDosAnexos(anexos)].map(texto).filter(Boolean))];
-    return { nome, pasta, mensagem, dados, anexos, importado, selecionado: !importado, erro: "" };
+    return {
+      nome, pasta, mensagem, dados, anexos, importado,
+      importadoNome: ARQUIVO_IMPORTADO,
+      selecionado: !importado, erro: "",
+    };
+  }
+
+  async function carregarPacotePlano(prefixo, pasta) {
+    const prontoNome = nomePlano(prefixo, ARQUIVO_PRONTO);
+    if (!await arquivoDaPasta(pasta, prontoNome)) return null;
+    const mensagemNome = nomePlano(prefixo, ARQUIVO_MENSAGEM);
+    const importadoNome = nomePlano(prefixo, ARQUIVO_IMPORTADO);
+    const mensagem = await jsonDaPasta(pasta, mensagemNome);
+    if (!mensagem) return { nome: prefixo, pasta, importadoNome, erro: `${mensagemNome} inválido ou indisponível.` };
+    const importado = await jsonDaPasta(pasta, importadoNome);
+    const anexos = await anexosPlanos(pasta, prefixo);
+    const dados = normalizarMensagem(mensagem, prefixo);
+    dados.documentos = [...new Set([...dados.documentos, ...documentosDosAnexos(anexos)].map(texto).filter(Boolean))];
+    return {
+      nome: prefixo, pasta, mensagem, dados, anexos, importado, importadoNome,
+      selecionado: !importado, erro: "",
+    };
   }
 
   async function lerFila() {
     const resultado = [];
     for await (const [nome, handle] of handleFila.entries()) {
-      if (!handle || handle.kind !== "directory") continue;
-      const pacote = await carregarPacote(nome, handle);
+      if (!handle) continue;
+      let pacote = null;
+      if (handle.kind === "directory") pacote = await carregarPacote(nome, handle);
+      else if (handle.kind === "file" && nome.toLowerCase().endsWith(`${SEPARADOR_PACOTE}${ARQUIVO_PRONTO}`)) {
+        const prefixo = nome.slice(0, -(`${SEPARADOR_PACOTE}${ARQUIVO_PRONTO}`).length);
+        if (prefixo) pacote = await carregarPacotePlano(prefixo, handleFila);
+      }
       if (pacote) resultado.push(pacote);
     }
     resultado.sort((a, b) => {
@@ -403,7 +458,7 @@
   }
 
   async function gravarMarcador(pacote, dados) {
-    const handle = await pacote.pasta.getFileHandle(ARQUIVO_IMPORTADO, { create: true });
+    const handle = await pacote.pasta.getFileHandle(pacote.importadoNome || ARQUIVO_IMPORTADO, { create: true });
     const gravador = await handle.createWritable();
     await gravador.write(JSON.stringify(dados, null, 2));
     await gravador.close();

@@ -5,7 +5,7 @@ personalizado, Microsoft Entra, gateway local, PowerShell nem licença Premium.
 
 ## Estrutura esperada
 
-Na caixa compartilhada do Outlook:
+Na caixa corporativa do usuário:
 
 ```text
 GRCON Flow
@@ -21,20 +21,20 @@ GRCON Flow
 └── Fila
 ```
 
-Cada e-mail concluído vira uma subpasta de `Fila`:
+Como o conector padrão **OneDrive for Business** deste ambiente não oferece a
+ação de criar subpasta, cada e-mail usa um prefixo único dentro de `Fila`:
 
 ```text
 Fila
-└── 20260901153000123-<guid>
-    ├── mensagem.json
-    ├── documento.pdf
-    ├── planilha.xlsx
-    └── pronto.json
+├── 20260901153000123-<guid>__mensagem.json
+├── 20260901153000123-<guid>__anexo__documento.pdf
+├── 20260901153000123-<guid>__anexo__planilha.xlsx
+└── 20260901153000123-<guid>__pronto.json
 ```
 
-O GRCON Flow ignora pastas sem `pronto.json`. Depois do registro, o navegador
-grava `importado.json` com o protocolo, os anexos enviados e a situação da
-triagem.
+O GRCON Flow ignora pacotes sem `__pronto.json`. Depois do registro, o navegador
+grava `<ID>__importado.json` com o protocolo, os anexos enviados e a situação
+da triagem. O formato anterior em subpastas permanece compatível.
 
 ## Fluxo `GRCON Flow - Capturar e-mails`
 
@@ -44,8 +44,8 @@ triagem.
    - Controle de simultaneidade: ativado, grau `1`
 
 2. **Get emails (V3) / Obter emails (V3)** — Office 365 Outlook
-   - Original Mailbox Address: endereço da caixa compartilhada
-   - Folder: `GRCON Flow/Entrada`
+   - Mailbox: `vinicio.silva@agnet.com.br`
+   - Folder: `Inbox/GRCON FLOW/Entrada`
    - Fetch Only Unread Messages: `No`
    - Include Attachments: `Yes`
    - Top: `25`
@@ -68,36 +68,32 @@ triagem.
       setProperty(setProperty(setProperty(setProperty(setProperty(setProperty(setProperty(setProperty(setProperty(json('{}'),'schema_version',1),'id',item()?['id']),'internetMessageId',item()?['internetMessageId']),'subject',item()?['subject']),'body',item()?['body']),'bodyPreview',item()?['bodyPreview']),'from',item()?['from']),'receivedDateTime',item()?['receivedDateTime']),'importance',item()?['importance'])
       ```
 
-   3. **Create new folder / Criar nova pasta** — OneDrive for Business
-      - Pasta pai: `/GRCON Flow/Fila`
-      - Nome: saída de `ID do pacote`
-
-   4. **Create file / Criar arquivo** — OneDrive for Business
-      - Folder Path: `/GRCON Flow/Fila/<saída de ID do pacote>`
-      - File Name: `mensagem.json`
+   3. **Create file / Criar arquivo** — OneDrive for Business
+      - Folder Path: `/GRCON Flow/Fila`
+      - File Name: `<saída de ID do pacote>__mensagem.json`
       - File Content: `string(outputs('Metadados'))`
 
-   5. **Apply to each / Aplicar a cada** usando `Attachments` do e-mail.
+   4. **Apply to each / Aplicar a cada** usando `Attachments` do e-mail.
       - Adicionar uma condição: `IsInline` é igual a `false`.
       - No ramo **Yes**, usar **Create file / Criar arquivo**:
-        - Folder Path: a pasta do pacote
-        - File Name: `Name` do anexo
+        - Folder Path: `/GRCON Flow/Fila`
+        - File Name: `<ID do pacote>__anexo__<Name do anexo>`
         - File Content: `base64ToBinary(item()?['ContentBytes'])`
 
-   6. Depois dos anexos, criar `pronto.json` na pasta do pacote, com o conteúdo:
+   5. Depois dos anexos, criar `<ID do pacote>__pronto.json` em
+      `/GRCON Flow/Fila`, com o conteúdo:
 
       ```json
       {"schema_version":1}
       ```
 
-   7. **Move email (V2) / Mover email (V2)** — Office 365 Outlook
+   6. **Move email (V2) / Mover email (V2)** — Office 365 Outlook
       - Message Id: `id` do e-mail do loop externo
-      - Folder: `GRCON Flow/Processados`
-      - Original Mailbox Address: a mesma caixa compartilhada
+      - Folder: `Inbox/GRCON FLOW/Processados`
 
 5. Criar o **Scope / Escopo** `Em caso de erro`, configurado para executar
    somente quando `Preparar pacote` falhar ou expirar. Dentro dele, mover o
-   e-mail para `GRCON Flow/Erros`. Se esse último movimento também falhar, a
+   e-mail para `Inbox/GRCON FLOW/Erros`. Se esse último movimento também falhar, a
    mensagem permanece em `Entrada` e nada é perdido.
 
 ## Regras operacionais
@@ -106,7 +102,7 @@ triagem.
 - O fluxo nunca apaga mensagens.
 - Mensagem já lida também é processada; a pasta dedicada é a fila.
 - Anexo embutido de assinatura (`IsInline`) não entra no GRCON Flow.
-- Pasta incompleta não aparece no painel porque não possui `pronto.json`.
+- Pacote incompleto não aparece no painel porque não possui `__pronto.json`.
 - Repetir a importação devolve o mesmo protocolo para o mesmo operador.
-- O arquivo `importado.json` permite retomar uma falha de anexo.
+- O arquivo `<ID>__importado.json` permite retomar uma falha de anexo.
 - A triagem da LD continua ocorrendo somente depois da confirmação da equipe.
