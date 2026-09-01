@@ -27,14 +27,16 @@ ação de criar subpasta, cada e-mail usa um prefixo único dentro de `Fila`:
 ```text
 Fila
 ├── 20260901153000123-<guid>__mensagem.json
-├── 20260901153000123-<guid>__anexo__documento.pdf
-├── 20260901153000123-<guid>__anexo__planilha.xlsx
+├── 20260901153000123-<guid>__anexo__false__documento.pdf
+├── 20260901153000123-<guid>__anexo__false__planilha.xlsx
+├── 20260901153000123-<guid>__anexo__true__logo-assinatura.png
 └── 20260901153000123-<guid>__pronto.json
 ```
 
 O GRCON Flow ignora pacotes sem `__pronto.json`. Depois do registro, o navegador
 grava `<ID>__importado.json` com o protocolo, os anexos enviados e a situação
-da triagem. O formato anterior em subpastas permanece compatível.
+da triagem. Arquivos `true__` são imagens incorporadas e não entram na
+solicitação. O formato anterior em subpastas permanece compatível.
 
 ## Fluxo `GRCON Flow - Capturar e-mails`
 
