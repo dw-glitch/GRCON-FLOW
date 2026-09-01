@@ -1751,6 +1751,12 @@ check("pacotes incompletos não entram e a repetição não duplica protocolo", 
     "a fila plana precisa funcionar quando o OneDrive não oferece criação de subpasta");
   assert.match(importador, /MARCADOR_ANEXO/,
     "os anexos planos devem ser agrupados pelo prefixo do pacote");
+  assert.match(importador, /const MARCADOR_INLINE = "true__"/,
+    "imagens incorporadas da assinatura devem ser reconhecidas na fila plana");
+  assert.match(importador, /if \(nomeMinusculo\.startsWith\(MARCADOR_INLINE\)\) continue/,
+    "anexos incorporados não podem entrar no GRCON Flow");
+  assert.match(importador, /nomeMarcado\.slice\(MARCADOR_NORMAL\.length\)/,
+    "o marcador booleano deve ser retirado do nome dos anexos normais");
   assert.match(importador, /const ARQUIVO_IMPORTADO = "importado\.json"/);
   assert.match(importador, /uuidDeterministico\(`outlook:\$\{pacote\.dados\.externalId\}`\)/);
   assert.match(importador, /_client_request_id: clientRequestId/);

@@ -73,12 +73,21 @@ da triagem. O formato anterior em subpastas permanece compatível.
       - File Name: `<saída de ID do pacote>__mensagem.json`
       - File Content: `string(outputs('Metadados'))`
 
-   4. **Apply to each / Aplicar a cada** usando `Attachments` do e-mail.
-      - Adicionar uma condição: `IsInline` é igual a `false`.
-      - No ramo **Yes**, usar **Create file / Criar arquivo**:
-        - Folder Path: `/GRCON Flow/Fila`
-        - File Name: `<ID do pacote>__anexo__<Name do anexo>`
-        - File Content: `base64ToBinary(item()?['ContentBytes'])`
+   4. **Apply to each / Aplicar a cada** usando `Attachments` do e-mail. Dentro
+      do loop, usar **Create file / Criar arquivo**:
+      - Folder Path: `/GRCON Flow/Fila`
+      - File Name:
+
+        ```text
+        concat(outputs('ID_do_pacote'),'__anexo__',string(item()?['IsInline']),'__',item()?['Name'])
+        ```
+
+      - File Content: `base64ToBinary(item()?['ContentBytes'])`
+
+      O nome recebe `true__` para imagem incorporada e `false__` para anexo
+      normal. Na leitura da fila, o GRCON Flow descarta automaticamente os
+      arquivos `true__` e remove `false__` do nome exibido, sem duplicar o
+      conteúdo dos anexos dentro de `mensagem.json`.
 
    5. Depois dos anexos, criar `<ID do pacote>__pronto.json` em
       `/GRCON Flow/Fila`, com o conteúdo:
@@ -91,10 +100,12 @@ da triagem. O formato anterior em subpastas permanece compatível.
       - Message Id: `id` do e-mail do loop externo
       - Folder: `Inbox/GRCON FLOW/Processados`
 
-5. Criar o **Scope / Escopo** `Em caso de erro`, configurado para executar
-   somente quando `Preparar pacote` falhar ou expirar. Dentro dele, mover o
-   e-mail para `Inbox/GRCON FLOW/Erros`. Se esse último movimento também falhar, a
-   mensagem permanece em `Entrada` e nada é perdido.
+5. Logo depois de `Mover para Processados`, adicionar outro **Move email (V2)**
+   chamado `Mover para Erros`, apontando para `Inbox/GRCON FLOW/Erros`. Em
+   **Settings > Run after**, desmarcar `Is successful` e marcar `Has failed`,
+   `Has timed out` e `Is skipped` para a etapa `Mover para Processados`. Se esse
+   último movimento também falhar, a mensagem permanece em `Entrada` e nada é
+   perdido.
 
 ## Regras operacionais
 

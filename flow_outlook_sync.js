@@ -27,6 +27,8 @@
   const ARQUIVO_IMPORTADO = "importado.json";
   const SEPARADOR_PACOTE = "__";
   const MARCADOR_ANEXO = `${SEPARADOR_PACOTE}anexo${SEPARADOR_PACOTE}`;
+  const MARCADOR_INLINE = "true__";
+  const MARCADOR_NORMAL = "false__";
   const EXTENSOES_IGNORADAS = new Set(["json", "tmp", "ini"]);
 
   let destinoAtual = null;
@@ -200,7 +202,11 @@
     const inicio = `${prefixo}${MARCADOR_ANEXO}`;
     for await (const [nome, handle] of pasta.entries()) {
       if (!handle || handle.kind !== "file" || !nome.startsWith(inicio)) continue;
-      const nomeOriginal = nome.slice(inicio.length);
+      const nomeMarcado = nome.slice(inicio.length);
+      const nomeMinusculo = nomeMarcado.toLocaleLowerCase("pt-BR");
+      if (nomeMinusculo.startsWith(MARCADOR_INLINE)) continue;
+      const nomeOriginal = nomeMinusculo.startsWith(MARCADOR_NORMAL)
+        ? nomeMarcado.slice(MARCADOR_NORMAL.length) : nomeMarcado;
       const extensao = nomeOriginal.toLowerCase().split(".").pop();
       if (!nomeOriginal || EXTENSOES_IGNORADAS.has(extensao)) continue;
       try { encontrados.push(arquivoComNome(await handle.getFile(), nomeOriginal)); } catch (_) { /* sincronização em curso */ }
