@@ -30,6 +30,61 @@
     return core ? core.norm(valor) : texto(valor).toUpperCase();
   }
 
+  const CATEGORIAS_N1710 = "CE|CR|DB|DE|EC|ET|FD|IM|IS|LA|LD|LI|LO|MA|MC|MD|MO|PR|PT|RL|RM|CT|SIT";
+  const DISCIPLINAS_ET = "ADC|ARR|DBU|CVL|CTO|CRS|CDR|DOC|ELE|REQ|ETF|FSC|FOR|GER|HVAC|INSP|INS|PDMS|MEC|DIN|EST|PLA|PRS|PRJ|QUA|SMS|SEG|SIS|SUP|TEL|TUB";
+  const PADROES_CODIGO_NORMATIVO = Object.freeze([
+    new RegExp(`(?:^|[^A-Z0-9])([A-Z0-9]{3}_RNEST_[A-Z0-9]+_\\d+(?:\\.\\d+){3}_(?:${DISCIPLINAS_ET})_[A-Z0-9][A-Z0-9.-]*_[A-Z0-9][A-Z0-9.-]*)(?=$|[^A-Z0-9])`, "i"),
+    /(?:^|[^A-Z0-9])(5900(?:\.\d+){3}-[A-Z0-9]{3}-CV-[A-Z0-9]+-\d{3,4})(?=$|[^A-Z0-9])/i,
+    new RegExp(`(?:^|[^A-Z0-9])((?:[IAFLED]-)?(?:${CATEGORIAS_N1710})-5290\\.00-\\d{4,5}-[A-Z0-9]{3}-[A-Z0-9]{3}-\\d{3,4})(?=$|[^A-Z0-9])`, "i"),
+  ]);
+  const PADRAO_ET_COM_HIFENS = new RegExp(
+    `(?:^|[^A-Z0-9])([A-Z0-9]{3})-RNEST-([A-Z0-9]+)-(\\d+(?:\\.\\d+){3})-(${DISCIPLINAS_ET})-([A-Z0-9]{2,10})-([A-Z0-9][A-Z0-9.-]*)(?=$|[^A-Z0-9])`,
+    "i"
+  );
+
+  /**
+   * Recupera somente correções determinísticas antes da triagem: caixa,
+   * travessões, separadores da N-1710 e sufixos comuns de arquivo/revisão.
+   * A estrutura reconhecível segue para a busca exata na LD. A decisão final
+   * de aceitar pela LD, validar pela norma ou ignorar fica no servidor, que é
+   * o único ponto com acesso às bases vigentes.
+   */
+  function corrigirCodigoParaTriagem(valor) {
+    const core = Core();
+    const original = texto(valor).replace(/[–—]/g, "-");
+    if (!original || !core || typeof core.validateDocumentCode !== "function") return "";
+    const motor = Requests();
+    const semArquivo = motor && typeof motor.documentFromFileName === "function"
+      ? motor.documentFromFileName(original).document : original;
+    const base = core.canonicalId ? core.canonicalId(semArquivo) : normalizar(semArquivo);
+    const etComHifens = base.match(PADRAO_ET_COM_HIFENS);
+    const etCorrigido = etComHifens
+      ? `${etComHifens[1]}_RNEST_${etComHifens[2]}_${etComHifens[3]}_${etComHifens[4]}_${etComHifens[5]}_${etComHifens[6]}`
+      : "";
+    const fontes = [
+      etCorrigido,
+      base,
+      base.includes("RNEST") ? base.replace(/\s+/g, "_") : "",
+      base.replace(/_/g, "-"),
+    ].filter(Boolean);
+
+    for (const fonte of fontes) {
+      for (const padrao of PADROES_CODIGO_NORMATIVO) {
+        const achado = fonte.match(padrao);
+        if (!achado || !achado[1]) continue;
+        let candidato = core.canonicalId ? core.canonicalId(achado[1]) : normalizar(achado[1]);
+        const familia = candidato.includes("_RNEST_") ? "ET" : /-CV-/i.test(candidato) ? "CV" : "N-1710";
+        if (familia === "ET" && typeof core.displayDocumentCode === "function") {
+          candidato = core.displayDocumentCode(candidato);
+        }
+        const validacao = core.validateDocumentCode(candidato, familia);
+        if (familia !== "N-1710" && (!validacao || !validacao.valid)) continue;
+        return candidato;
+      }
+    }
+    return "";
+  }
+
   /**
    * A forma alternativa do código (com ou sem o prefixo `nt-`), quando o
    * documento é ET. É o que permite achar na LD um documento informado na
@@ -104,9 +159,11 @@
   function daListaColada(bruto) {
     const motor = Requests();
     if (!motor) return [];
-    return motor.parseDocumentList(bruto).map((linha) =>
-      itemDeCodigo(linha.document, { titulo: linha.requestedTitle })
-    );
+    return motor.parseDocumentList(bruto).map((linha) => {
+      const codigo = corrigirCodigoParaTriagem(linha.document);
+      if (codigo) return itemDeCodigo(codigo, { titulo: linha.requestedTitle });
+      return linha.requestedTitle ? itemDeTitulo(linha.requestedTitle, linha.document) : null;
+    }).filter(Boolean);
   }
 
   /**
@@ -121,11 +178,16 @@
     return texto(bruto).split(/\r?\n/).map((linha) => linha.trim()).filter(Boolean).map((linha) => {
       const partes = linha.split(/\t|\s*[;|]\s*/).map((item) => texto(item)).filter(Boolean);
       if (partes.length > 1 && pareceCodigo(partes[0])) {
-        return itemDeCodigo(partes[0], { titulo: partes.slice(1).join(" - ") });
+        const codigo = corrigirCodigoParaTriagem(partes[0]);
+        const titulo = partes.slice(1).join(" - ");
+        return codigo ? itemDeCodigo(codigo, { titulo }) : (titulo ? itemDeTitulo(titulo, partes[0]) : null);
       }
-      if (pareceCodigo(linha)) return itemDeCodigo(linha);
+      if (pareceCodigo(linha)) {
+        const codigo = corrigirCodigoParaTriagem(linha);
+        return codigo ? itemDeCodigo(codigo) : null;
+      }
       return itemDeTitulo(linha, "");
-    });
+    }).filter(Boolean);
   }
 
   /**
@@ -144,8 +206,9 @@
     const lista = Array.from(arquivos || []);
     return lista.map((arquivo) => {
       const lido = motor.documentFromFileName(arquivo.name);
-      return lido.document && pareceCodigo(lido.document)
-        ? itemDeCodigo(lido.document, { arquivo: arquivo.name })
+      const codigo = corrigirCodigoParaTriagem(lido.document);
+      return codigo
+        ? itemDeCodigo(codigo, { arquivo: arquivo.name })
         : { ...itemDeTitulo("", arquivo.name), file_name: arquivo.name };
     });
   }
@@ -483,6 +546,7 @@
     chave,
     normalizar,
     chaveAlternativa,
+    corrigirCodigoParaTriagem,
     pareceCodigo,
     itemDeCodigo,
     itemDeTitulo,

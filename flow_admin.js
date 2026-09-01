@@ -490,17 +490,73 @@
     ]);
   }
 
+  function blocoNumeracaoProtocolos(configuracao, recarregar) {
+    const dados = configuracao || {};
+    const ano = Number(dados.year) || new Date().getFullYear();
+    const minimo = Math.max(1, Number(dados.minimum_next_number) || 1);
+    const proximoAtual = Math.max(minimo, Number(dados.next_number) || minimo);
+    const formato = (numero) => `FLOW-${ano}-${String(numero).padStart(6, "0")}`;
+    const entrada = elemento("input", {
+      id: "protocolo-proximo-numero", type: "number", min: String(minimo), max: "999999",
+      step: "1", value: String(proximoAtual), autocomplete: "off",
+    });
+
+    return elemento("section", { class: "flow-card" }, [
+      elemento("div", { class: "flow-card-head" }, [
+        elemento("h3", { text: "Numeração dos protocolos" }),
+        elemento("p", { text: "Defina o número da próxima solicitação. Depois dele, o GRCON Flow continua a sequência automaticamente; protocolos já registrados permanecem iguais." }),
+      ]),
+      elemento("div", { class: "flow-grid" }, [
+        elemento("div", { class: "flow-campo" }, [
+          elemento("span", { text: "Último protocolo gerado" }),
+          elemento("strong", { text: dados.last_protocol || "Nenhum neste ano" }),
+        ]),
+        elemento("label", { class: "flow-campo", for: "protocolo-proximo-numero" }, [
+          elemento("span", { text: "Próximo número" }),
+          elemento("small", { text: `O menor número disponível é ${minimo}.` }),
+          entrada,
+        ]),
+      ]),
+      elemento("div", { class: "flow-acoes", style: "margin-top:.8rem" }, [
+        elemento("button", {
+          class: "primary-button", type: "button", text: "Definir próximo protocolo",
+          onclick: async () => {
+            const numero = Math.trunc(Number(entrada.value));
+            if (!Number.isSafeInteger(numero) || numero < minimo || numero > 999999) {
+              avisar(`Informe um número inteiro entre ${minimo} e 999999.`, "erro");
+              return;
+            }
+            const protocolo = formato(numero);
+            if (!await Ui.confirmar(`Usar ${protocolo} na próxima solicitação?`, {
+              titulo: "Alterar sequência de protocolos",
+              rotuloConfirmar: "Alterar sequência",
+              rotuloCancelar: "Manter numeração atual",
+              ajuda: `Após ${protocolo}, a sequência seguirá ${formato(numero + 1)}, ${formato(numero + 2)} e assim por diante.`,
+            })) return;
+            const { data, error } = await Api.protocolos.definirProximo(numero);
+            if (error) { avisar(error, "erro"); return; }
+            avisar(`Próximo protocolo definido como ${(data && data.next_protocol) || protocolo}.`, "ok");
+            recarregar();
+          },
+        }),
+      ]),
+    ]);
+  }
+
   async function montarAcesso(destino) {
     Ui.carregando(destino, "Carregando o acesso…");
-    const [dominios, equipe] = await Promise.all([Api.acesso.dominios(), Api.acesso.listar()]);
-    if (dominios.error || equipe.error) {
-      Ui.vazio(destino, "Não foi possível carregar", dominios.error || equipe.error);
+    const [dominios, equipe, protocolos] = await Promise.all([
+      Api.acesso.dominios(), Api.acesso.listar(), Api.protocolos.configuracao(),
+    ]);
+    if (dominios.error || equipe.error || protocolos.error) {
+      Ui.vazio(destino, "Não foi possível carregar", dominios.error || equipe.error || protocolos.error);
       return;
     }
     const recarregar = () => montarAcesso(destino);
     destino.replaceChildren(
       elemento("div", { class: "flow-aviso", text:
         "Duas perguntas diferentes: o domínio diz quem pode criar conta; a lista de e-mails diz quem é da equipe e vê o painel." }),
+      blocoNumeracaoProtocolos(protocolos.data, recarregar),
       blocoDominios(dominios.data, recarregar),
       blocoEquipe(equipe.data || [], recarregar)
     );

@@ -30,6 +30,12 @@
   const MARCADOR_INLINE = "true__";
   const MARCADOR_NORMAL = "false__";
   const EXTENSOES_IGNORADAS = new Set(["json", "tmp", "ini"]);
+  const INICIOS_AVISO_CONFIDENCIALIDADE = Object.freeze([
+    /as\s+informa[cç][oõ]es\s+contidas\s+n(?:esta|essa)\s+mensagem\s+ou\s+(?:o\s+conte[uú]do\s+de\s+)?seus?\s+(?:eventuais\s+)?anexos\s+pertencem\s+ao\s+grupo\s+andrade\s+gutierrez\b/i,
+    /a\s+informa[cç][aã]o\s+contida\s+n(?:esta|essa)\s+mensagem\s+ou\s+(?:no\s+conte[uú]do\s+de\s+)?seus?\s+(?:eventuais\s+)?anexos\s+pertence\s+ao\s+grupo\s+andrade\s+gutierrez\b/i,
+    /the\s+information\s+contained\s+in\s+this\s+message\s+or\s+in\s+any\s+of\s+its\s+attachments\s+belongs\s+to\s+the\s+andrade\s+gutierrez\s+group\b/i,
+    /la\s+informaci[oó]n\s+contenida\s+en\s+este\s+mensaje\s+o\s+en\s+sus\s+eventuales\s+anexos\s+pertenece\s+al\s+grupo\s+andrade\s+gutierrez\b/i,
+  ]);
 
   let destinoAtual = null;
   let tiposAtuais = [];
@@ -94,6 +100,20 @@
     }
   }
 
+  function removerAvisoConfidencialidade(valor) {
+    const bruto = String(valor || "");
+    let inicioAviso = bruto.length;
+    INICIOS_AVISO_CONFIDENCIALIDADE.forEach((padrao) => {
+      const encontrado = padrao.exec(bruto);
+      if (encontrado && encontrado.index < inicioAviso) inicioAviso = encontrado.index;
+    });
+    if (inicioAviso === bruto.length) return bruto.trim();
+    return bruto.slice(0, inicioAviso)
+      .replace(/(?:rnest\s*)?www\.consagsa\.com\.br\s*$/i, "")
+      .replace(/(?:\s*(?:[-_=–—*]{3,}|aviso\s+de\s+confidencialidade\s*:|disclaimer\s*:))+$/i, "")
+      .trim();
+  }
+
   function primeiro(objeto, chaves) {
     for (const chave of chaves) {
       const valor = objeto && objeto[chave];
@@ -123,9 +143,9 @@
     const remetente = remetenteDe(mensagem);
     const corpoBruto = primeiro(mensagem, ["body", "Body", "bodyContent", "BodyContent", "content", "Content"]);
     const corpoObjeto = corpoBruto && typeof corpoBruto === "object" ? corpoBruto : null;
-    const corpo = htmlParaTexto(corpoObjeto
+    const corpo = removerAvisoConfidencialidade(htmlParaTexto(corpoObjeto
       ? primeiro(corpoObjeto, ["content", "Content", "body", "Body"])
-      : corpoBruto || primeiro(mensagem, ["bodyPreview", "BodyPreview", "preview", "Preview"]));
+      : corpoBruto || primeiro(mensagem, ["bodyPreview", "BodyPreview", "preview", "Preview"])));
     const assunto = texto(primeiro(mensagem, ["subject", "Subject", "assunto"]));
     const externalId = texto(primeiro(mensagem, [
       "internetMessageId", "InternetMessageId", "internet_message_id", "id", "Id", "messageId", "MessageId",
@@ -682,5 +702,7 @@
     restaurarPasta();
   }
 
-  root.FlowOutlookSync = Object.freeze({ montar, normalizarMensagem, uuidDeterministico });
+  root.FlowOutlookSync = Object.freeze({
+    montar, normalizarMensagem, removerAvisoConfidencialidade, uuidDeterministico,
+  });
 })(window);

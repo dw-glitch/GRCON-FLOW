@@ -1435,6 +1435,24 @@
     },
   };
 
+  const protocolos = {
+    async configuracao() {
+      if (!auth.ehAdmin()) return { data: null, error: "Somente administradores podem consultar a numeração." };
+      return chamar(client.rpc("flow_protocol_settings"), "carregar numeração dos protocolos");
+    },
+    async definirProximo(numero) {
+      if (!auth.ehAdmin()) return { data: null, error: "Somente administradores podem alterar a numeração." };
+      const proximo = Math.trunc(Number(numero));
+      if (!Number.isSafeInteger(proximo) || proximo < 1 || proximo > 999999) {
+        return { data: null, error: "Informe um número inteiro entre 1 e 999999." };
+      }
+      return chamar(
+        client.rpc("flow_set_next_protocol", { p_next_number: proximo }),
+        "definir próximo protocolo"
+      );
+    },
+  };
+
   const exportacao = {
     /** Linhas cruas da exportação. A montagem das colunas fica em flow_export.js. */
     async linhas(filtros = {}) {
@@ -1458,7 +1476,7 @@
 
   root.FlowApi = Object.freeze({
     client, config, auth, tipos, solicitacoes, itens, triagem, lds, normas,
-    comentarios, anexos, armazenamento, historico, notificacoes, usuarios, acesso, exportacao,
+    comentarios, anexos, armazenamento, historico, notificacoes, usuarios, acesso, protocolos, exportacao,
     ORDENS_DE_SOLICITACAO,
   });
 })(window);

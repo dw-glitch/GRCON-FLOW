@@ -151,7 +151,9 @@
         // separadores antes de encaminhar o token para a busca nas LDs.
         if ((token.match(/[-_./]/g) || []).length < 2) return;
         const codigoDoArquivo = candidatoDeArquivo(token);
-        const codigo = codigoDoArquivo || (Docs.pareceCodigo(token) ? token : "");
+        const codigo = Docs.corrigirCodigoParaTriagem
+          ? Docs.corrigirCodigoParaTriagem(codigoDoArquivo || token)
+          : codigoDoArquivo || (Docs.pareceCodigo(token) ? token : "");
         if (!codigo) return;
         const chave = Docs.chave ? Docs.chave(codigo) : codigo.toUpperCase();
         if (!chave || vistos.has(chave)) return;

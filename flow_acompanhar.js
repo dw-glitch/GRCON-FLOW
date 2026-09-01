@@ -41,6 +41,7 @@
     }
     if (status === "POSSIVEL_EXISTENTE") return "POSSÍVEL EXISTENTE · código em validação";
     if (status === "PENDENTE_IDENTIFICACAO") return "IDENTIFICAÇÃO PENDENTE · código ainda não confirmado";
+    if (status === "IGNORADO_CODIGO_INVALIDO") return "CÓDIGO FORA DA NORMA · triagem ignorada";
     return "";
   }
 

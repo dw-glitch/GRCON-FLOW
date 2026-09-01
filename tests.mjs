@@ -32,10 +32,12 @@ await import(`file://${path.join(root, "flow_export.js")}`);
 // flow_ui.js só toca no DOM dentro das funções; carregá-lo aqui permite
 // exercitar o vocabulário compartilhado em vez de conferi-lo por regex.
 await import(`file://${path.join(root, "flow_ui.js")}`);
+await import(`file://${path.join(root, "flow_outlook_sync.js")}`);
 
 const Docs = janela.FlowDocs;
 const QuickParse = janela.FlowQuickParse;
 const Export = janela.FlowExport;
+const OutlookSync = janela.FlowOutlookSync;
 const Report = janela.GrconRequestsReport;
 
 // ── Normalização e identificação ───────────────────────────────────────────
@@ -70,6 +72,28 @@ check("código não é inventado a partir de nome de arquivo sem código", () =>
 check("ponto do código não é confundido com extensão", () => {
   const [item] = Docs.deArquivos([{ name: "LI-5290.00-22313-950-1LV-001" }]);
   assert.equal(item.document, "LI-5290.00-22313-950-1LV-001");
+});
+
+check("a entrada corrige códigos normativos antes da triagem e ignora falsos códigos", () => {
+  assert.equal(
+    Docs.corrigirCodigoParaTriagem("PR_5290.00_22313_175_C1O_040_0001_RIR.pdf"),
+    "PR-5290.00-22313-175-C1O-040",
+    "separadores e sufixo SIGEM devem ser corrigidos sem adivinhar grupos"
+  );
+  assert.equal(
+    Docs.corrigirCodigoParaTriagem("C1O_RNEST_U32_3.1.1.1_INS_RIR_NT-SPE-AST-320019_0001_A.xlsx"),
+    "C1O_RNEST_U32_3.1.1.1_INS_RIR_nt-SPE-AST-320019",
+    "o prefixo nt- de relatório deve voltar à grafia normativa"
+  );
+  assert.equal(Docs.corrigirCodigoParaTriagem("ABC-123-QUALQUER-COISA"), "");
+  assert.deepEqual(
+    QuickParse.extrairDocumentos([
+      "Postar PR_5290.00_22313_175_C1O_040_0001_RIR.pdf",
+      "Referência interna ABC-123-QUALQUER-COISA",
+    ]),
+    ["PR-5290.00-22313-175-C1O-040"],
+    "somente o código corrigido e validado pode seguir para a triagem"
+  );
 });
 
 check("uma referência solta é encaminhada por parecer código ou por parecer título", () => {
@@ -411,7 +435,23 @@ check("a aba Acesso é de administrador e existe de ponta a ponta", () => {
   ["dominios", "definirDominios", "listar", "definir", "remover"].forEach((metodo) => {
     assert.match(api, new RegExp(`\\b${metodo}\\b`), `falta ${metodo} no grupo acesso`);
   });
-  assert.match(api, /usuarios, acesso, exportacao/, "o grupo acesso precisa ser exportado");
+  assert.match(api, /usuarios, acesso, protocolos, exportacao/, "acesso e protocolos precisam ser exportados");
+});
+
+check("administradores controlam o próximo protocolo sem renumerar o histórico", () => {
+  const admin = fs.readFileSync(path.join(root, "flow_admin.js"), "utf8");
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  const migration = fs.readFileSync(path.join(root,
+    "database/migrations/flow_46_triagem_normativa_e_protocolos.sql"), "utf8");
+  assert.match(admin, /Numeração dos protocolos/);
+  assert.match(admin, /protocolos já registrados permanecem iguais/);
+  assert.match(api, /flow_protocol_settings/);
+  assert.match(api, /flow_set_next_protocol/);
+  assert.match(migration, /if not public\.flow_is_admin\(\)/);
+  assert.match(migration, /for update/,
+    "a troca da sequência precisa bloquear concorrência no contador");
+  assert.match(migration, /p_next_number < minimo/,
+    "não pode retroceder para um número já consumido");
 });
 
 check("normas e catálogos são administráveis e versionados", () => {
@@ -1050,7 +1090,7 @@ check("a colagem do Outlook preenche somente dados reconhecidos e limpa cabeçal
   assert.equal(resultado.tipoCodigo, "POSTAGEM_SIGEM");
   assert.equal(resultado.canal, "outlook");
   assert.deepEqual(resultado.documentos, [
-    "C1O-RNEST-U32-3.8.9.1-TUB-REP-VM-322567",
+    "C1O_RNEST_U32_3.8.9.1_TUB_REP_VM-322567",
     "MC-5290.00-22313-970-C1O-009",
   ]);
   assert.doesNotMatch(resultado.pedido, /De:|Enviado:|Para:|Atenciosamente|joao\.silva@/i);
@@ -1084,10 +1124,10 @@ check("a análise não inventa tipo nem pessoa quando a mensagem é ambígua", (
   assert.equal(resultado.documentos.length, 0);
 });
 
-check("códigos repetidos na mensagem saem uma vez e com a primeira grafia", () => {
+check("códigos repetidos na mensagem saem uma vez e com a grafia normativa", () => {
   const codigo = "C1O-RNEST-U32-3.8.9.1-TUB-REP-VM-322567";
   const resultado = QuickParse.analisar(`${codigo}\n${codigo.toLowerCase()}\n28/08/2026`);
-  assert.deepEqual(resultado.documentos, [codigo]);
+  assert.deepEqual(resultado.documentos, ["C1O_RNEST_U32_3.8.9.1_TUB_REP_VM-322567"]);
 });
 
 check("o Registro rápido não depende de favoritos removidos do banco atual", () => {
@@ -1534,10 +1574,13 @@ check("o vocabulário da origem é o mesmo que o banco aceita", () => {
   const flow25 = fs.readFileSync(
     path.join(root, "database/migrations/flow_25_triage_requester_dwg_limits.sql"), "utf8"
   );
+  const flow46 = fs.readFileSync(
+    path.join(root, "database/migrations/flow_46_triagem_normativa_e_protocolos.sql"), "utf8"
+  );
   Object.keys(Ui.PRESENCAS_EM_LD).forEach((valor) => {
     assert.ok(
-      new RegExp(`'${valor}'`).test(flow25),
-      `a presença "${valor}" precisa ser um valor real de ld_presence_status`
+      new RegExp(`'${valor}'`).test(`${flow25}\n${flow46}`),
+      `a presença "${valor}" precisa ser um valor real de ld_presence_status vigente`
     );
   });
 });
@@ -1763,6 +1806,46 @@ check("pacotes incompletos não entram e a repetição não duplica protocolo", 
   assert.match(importador, /status: "enviando_anexos"/,
     "o protocolo deve ser marcado antes do primeiro anexo para permitir retomada");
   assert.match(importador, /Api\.solicitacoes\.obter\(marcador\.request_id\)/);
+});
+
+check("o rodapé confidencial da Andrade Gutierrez não entra no pedido", () => {
+  const aviso = "RNESTwww.consagsa.com.br As informações contidas nessa mensagem ou o conteúdo de seus eventuais anexos pertencem ao Grupo Andrade Gutierrez, são confidenciais e se destinam ao conhecimento e uso exclusivos dos destinatários. The information contained in this message or in any of its attachments belongs to the Andrade Gutierrez Group, is confidential. La información contenida en este mensaje o en sus eventuales anexos pertenece al Grupo Andrade Gutierrez, es confidencial.";
+  const corpo = `Favor realizar a postagem do documento.\n\n${aviso}`;
+  assert.equal(OutlookSync.removerAvisoConfidencialidade(corpo),
+    "Favor realizar a postagem do documento.");
+
+  const mensagem = OutlookSync.normalizarMensagem({
+    id: "teste-aviso", subject: "Solicitação de postagem", body: corpo,
+    from: { emailAddress: { name: "Solicitante", address: "solicitante@agnet.com.br" } },
+  }, "teste-aviso");
+  assert.equal(mensagem.corpo, "Favor realizar a postagem do documento.");
+  assert.doesNotMatch(mensagem.pedido, /consagsa|confidential|confidenciais|confidencialidad/i);
+  assert.equal(OutlookSync.removerAvisoConfidencialidade("Mensagem comum sobre os anexos."),
+    "Mensagem comum sobre os anexos.", "texto normal não pode ser removido");
+});
+
+check("a triagem consulta a LD antes de ignorar um código fora da norma", () => {
+  const migration = fs.readFileSync(path.join(root,
+    "database/migrations/flow_46_triagem_normativa_e_protocolos.sql"), "utf8");
+  const busca = migration.indexOf("flow_triage_item_base_v46(target_item)");
+  const descarte = migration.indexOf("CODIGO_INVALIDO_IGNORADO");
+  assert.ok(busca >= 0 && descarte > busca,
+    "a busca corrigida na LD deve acontecer antes da decisão de ignorar");
+  assert.match(migration, /codigo_original <> ''/,
+    "ausência de código não pode ser confundida com código inválido");
+  assert.match(migration, /flow_document_code_is_normative/);
+  assert.match(migration, /document = '', document_key = '', nt_key = ''/,
+    "um falso código não pode continuar disponível para uma nova busca automática");
+});
+
+check("o GRCON Flow usa o ícone PNG oficial do GRCON", () => {
+  const icone = fs.readFileSync(path.join(root, "grcon-icon.png"));
+  assert.equal(icone.subarray(1, 4).toString("ascii"), "PNG");
+  for (const pagina of ["index.html", "painel.html", "solicitar.html", "acompanhar.html"]) {
+    const html = fs.readFileSync(path.join(root, pagina), "utf8");
+    assert.match(html, /rel="icon" type="image\/png" href="grcon-icon\.png"/);
+    assert.match(html, /rel="apple-touch-icon" href="grcon-icon\.png"/);
+  }
 });
 
 check("o fluxo documentado usa somente conectores padrão e nunca apaga e-mail", () => {

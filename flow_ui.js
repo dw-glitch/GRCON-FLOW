@@ -69,6 +69,7 @@
     ACAO_NECESSARIA: Object.freeze({ rotulo: "JÁ EXISTE · sem alocação", classe: "acao" }),
     IDENTIFICACAO_PENDENTE: Object.freeze({ rotulo: "PENDENTE · identificar código", classe: "pendente" }),
     POSSIVEIS_CORRESPONDENCIAS: Object.freeze({ rotulo: "POSSÍVEL EXISTENTE · confirmar", classe: "candidatos" }),
+    CODIGO_INVALIDO_IGNORADO: Object.freeze({ rotulo: "IGNORADO · código fora da norma", classe: "neutro" }),
     TRIAGEM_NAO_APLICAVEL: Object.freeze({ rotulo: "Triagem não aplicável", classe: "neutro" }),
   });
 
@@ -172,6 +173,7 @@
     JA_EXISTE_DIVERGENTE:   "JÁ PREVISTO — com divergência entre LDs",
     PENDENTE_IDENTIFICACAO: "A CONFIRMAR — código não identificado",
     POSSIVEL_EXISTENTE:     "A CONFIRMAR — possível correspondência por título",
+    IGNORADO_CODIGO_INVALIDO: "IGNORADO — código fora da norma",
     NAO_APLICAVEL:          "Não se aplica a este tipo",
     NAO_AVALIADO:           "Ainda não avaliado",
   });
@@ -261,7 +263,7 @@
     if (codigo) return { estado: "identificada", codigo, rotulo: codigo };
     // Tipo que não consulta LD não tem alocação para ter ou deixar de ter.
     // Dizer "sem alocação identificada" aqui afirmaria que procuramos.
-    if (texto(item && item.classification) === "TRIAGEM_NAO_APLICAVEL") {
+    if (["TRIAGEM_NAO_APLICAVEL", "CODIGO_INVALIDO_IGNORADO"].includes(texto(item && item.classification))) {
       return { estado: "nao-aplicavel", codigo: "", rotulo: "—" };
     }
     const status = texto(item && item.allocation_status).toUpperCase().replace(/\s+/g, " ");

@@ -42,6 +42,7 @@
     NAO_LOCALIZADO: "Não localizado nas LDs", ACAO_NECESSARIA: "Sem alocação identificada",
     IDENTIFICACAO_PENDENTE: "Código a identificar",
     POSSIVEIS_CORRESPONDENCIAS: "Possíveis correspondências",
+    CODIGO_INVALIDO_IGNORADO: "Código fora da norma — ignorado",
     TRIAGEM_NAO_APLICAVEL: "Triagem não aplicável",
   });
 
