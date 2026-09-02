@@ -33,10 +33,18 @@ Fila
 └── 20260901153000123-<guid>__pronto.json
 ```
 
-O GRCON Flow ignora pacotes sem `__pronto.json`. Depois do registro, o navegador
-grava `<ID>__importado.json` com o protocolo, os anexos enviados e a situação
-da triagem. Arquivos `true__` são imagens incorporadas e não entram na
-solicitação. O formato anterior em subpastas permanece compatível.
+O GRCON Flow ignora pacotes sem `__pronto.json`, e **recusa o registro** de um
+pacote cujo número de anexos na fila seja menor do que o `attachment_count`
+declarado no marcador — ou cujo arquivo esteja na pasta mas não possa ser
+aberto. Depois do registro, o navegador grava `<ID>__importado.json` com o
+protocolo, os anexos enviados e a situação da triagem. Arquivos `true__` são
+imagens incorporadas e não entram na solicitação. O formato anterior em
+subpastas permanece compatível.
+
+> **Files On-Demand.** Marque a pasta `GRCON Flow\Fila` como **“Sempre manter
+> neste dispositivo”** no Explorer. Sem isso o OneDrive guarda apenas um
+> marcador on-line, e o navegador não consegue ler o anexo quando a rede
+> oscila.
 
 ## Fluxo `GRCON Flow - Capturar e-mails`
 
@@ -46,7 +54,8 @@ solicitação. O formato anterior em subpastas permanece compatível.
    - Controle de simultaneidade: ativado, grau `1`
 
 2. **Get emails (V3) / Obter emails (V3)** — Office 365 Outlook
-   - Mailbox: `vinicio.silva@agnet.com.br`
+   - Mailbox: a caixa que a equipe combinou monitorar. Prefira uma caixa ou
+     pasta cujo acesso não dependa de uma pessoa só — ver *Uso pela equipe*.
    - Folder: `Inbox/GRCON FLOW/Entrada`
    - Fetch Only Unread Messages: `No`
    - Include Attachments: `Yes`
@@ -92,11 +101,23 @@ solicitação. O formato anterior em subpastas permanece compatível.
       conteúdo dos anexos dentro de `mensagem.json`.
 
    5. Depois dos anexos, criar `<ID do pacote>__pronto.json` em
-      `/GRCON Flow/Fila`, com o conteúdo:
+      `/GRCON Flow/Fila`. O conteúdo precisa dizer **quantos anexos o e-mail
+      tinha** — é o que permite ao GRCON Flow distinguir "este e-mail não tinha
+      anexo" de "o anexo ainda não sincronizou":
 
-      ```json
-      {"schema_version":1}
+      ```text
+      concat('{"schema_version":2,"attachment_count":',
+             string(length(triggerOutputs()?['body/Attachments'])),
+             ',"message_id":"', item()?['internetMessageId'], '"}')
       ```
+
+      Dentro do *Apply to each* das mensagens, `length(...)` deve apontar para a
+      coleção `Attachments` **daquele** e-mail — no editor, o campo dinâmico
+      *Attachments* do item corrente. A contagem inclui as imagens incorporadas
+      da assinatura; o aplicativo desconta as que vierem com `true__`.
+
+      Pacote gravado no formato antigo (`{"schema_version":1}`, sem contagem)
+      continua sendo lido, só que sem a conferência de completude.
 
    6. **Move email (V2) / Mover email (V2)** — Office 365 Outlook
       - Message Id: `id` do e-mail do loop externo
@@ -119,3 +140,28 @@ solicitação. O formato anterior em subpastas permanece compatível.
 - Repetir a importação devolve o mesmo protocolo para o mesmo operador.
 - O arquivo `<ID>__importado.json` permite retomar uma falha de anexo.
 - A triagem da LD continua ocorrendo somente depois da confirmação da equipe.
+- Pacote com anexo faltando aparece como **Incompleto** e não pode ser
+  registrado até a sincronização terminar.
+
+## Uso pela equipe
+
+A fila não deve depender da conta de uma pessoa. Duas formas, ambas com
+conector padrão e sem pedir nada ao TI:
+
+1. **Pasta do OneDrive compartilhada** (imediata) — mantenha *um* fluxo, na
+   conta de quem o administra, e compartilhe a pasta `GRCON Flow/Fila` com
+   edição para a equipe. Cada pessoa sincroniza essa pasta e aponta o navegador
+   para ela. Como o `__importado.json` fica visível para todos, ninguém importa
+   de novo o que outra pessoa já registrou.
+2. **Biblioteca do SharePoint** (recomendada a médio prazo) — troque a ação de
+   gravação para *Create file* do conector **SharePoint**, também padrão,
+   apontando para uma biblioteca da equipe. A biblioteca sincronizada aparece no
+   Explorer como qualquer pasta, então o GRCON Flow não muda: continua sendo um
+   diretório escolhido pela pessoa. A fila deixa de pertencer a uma conta
+   pessoal e sobrevive a férias e desligamentos.
+
+Criar uma **caixa compartilhada** do Microsoft 365 resolveria o mesmo problema
+pelo lado do Outlook, mas **depende do TI** — não presuma a autorização.
+
+O aplicativo recusa protocolo duplicado para o mesmo e-mail mesmo que duas
+pessoas importem o mesmo pacote, pela chave derivada do `internetMessageId`.

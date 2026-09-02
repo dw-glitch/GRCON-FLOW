@@ -30,12 +30,28 @@
   const MARCADOR_INLINE = "true__";
   const MARCADOR_NORMAL = "false__";
   const EXTENSOES_IGNORADAS = new Set(["json", "tmp", "ini"]);
-  const INICIOS_AVISO_CONFIDENCIALIDADE = Object.freeze([
-    /as\s+informa[cç][oõ]es\s+contidas\s+n(?:esta|essa)\s+mensagem\s+ou\s+(?:o\s+conte[uú]do\s+de\s+)?seus?\s+(?:eventuais\s+)?anexos\s+pertencem\s+ao\s+grupo\s+andrade\s+gutierrez\b/i,
-    /a\s+informa[cç][aã]o\s+contida\s+n(?:esta|essa)\s+mensagem\s+ou\s+(?:no\s+conte[uú]do\s+de\s+)?seus?\s+(?:eventuais\s+)?anexos\s+pertence\s+ao\s+grupo\s+andrade\s+gutierrez\b/i,
-    /the\s+information\s+contained\s+in\s+this\s+message\s+or\s+in\s+any\s+of\s+its\s+attachments\s+belongs\s+to\s+the\s+andrade\s+gutierrez\s+group\b/i,
-    /la\s+informaci[oó]n\s+contenida\s+en\s+este\s+mensaje\s+o\s+en\s+sus\s+eventuales\s+anexos\s+pertenece\s+al\s+grupo\s+andrade\s+gutierrez\b/i,
+
+  // Os três idiomas do aviso corporativo. Cada padrão liga a abertura da frase
+  // ao nome do grupo dentro de uma janela curta: é essa âncora que impede
+  // apagar um pedido legítimo que apenas mencione "confidencial", "anexo" ou o
+  // nome da empresa. A janela usa `[\s\S]` porque o Outlook quebra a frase em
+  // várias linhas conforme a largura da janela de quem escreveu.
+  const AVISOS_CONFIDENCIALIDADE = Object.freeze([
+    /\bas?\s+informa[cç](?:[oõ]es|[aã]o)\s+contidas?\s+n(?:est|ess)[ae]\s+mensagem[\s\S]{0,400}?andrade\s+gutierrez/i,
+    /\bthe\s+information\s+contained\s+in\s+this\s+(?:message|e-?mail)[\s\S]{0,400}?andrade\s+gutierrez/i,
+    /\bla\s+informaci[oó]n\s+contenida\s+en\s+este\s+mensaje[\s\S]{0,400}?andrade\s+gutierrez/i,
   ]);
+  // Segunda condição: o trecho precisa falar de confidencialidade ou de posse.
+  // Sem isso, "As informações contidas nesta mensagem sobre a Andrade Gutierrez
+  // estão erradas" seria tratada como rodapé.
+  const EMAIL_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const PROVA_DE_AVISO = /confidenci|confidential|pertenc|pertenec|belongs|destinat|exclusiv|privileged/i;
+  const ENDERECO_CORPORATIVO = /(?:\bRNEST[ \t]*)?(?:https?:\/\/)?www\.consagsa\.com\.br\/?/gi;
+  // Onde termina o bloco do aviso: o fim do parágrafo, o começo de uma mensagem
+  // citada, ou o fim do texto. Cortar por bloco — e não do primeiro aviso até o
+  // fim — é o que preserva o pedido que vem depois numa cadeia encaminhada.
+  const RETOMADA_DE_MENSAGEM =
+    /\n[ \t]*(?:_{5,}|-{3,}[ \t]*(?:mensagem|original|forwarded)|(?:de|from|enviada?|sent|para|to|assunto|subject)[ \t]*:)/i;
 
   let destinoAtual = null;
   let tiposAtuais = [];
@@ -100,17 +116,58 @@
     }
   }
 
-  function removerAvisoConfidencialidade(valor) {
-    const bruto = String(valor || "");
-    let inicioAviso = bruto.length;
-    INICIOS_AVISO_CONFIDENCIALIDADE.forEach((padrao) => {
-      const encontrado = padrao.exec(bruto);
-      if (encontrado && encontrado.index < inicioAviso) inicioAviso = encontrado.index;
+  /**
+   * Caracteres que o Outlook insere e ninguém vê: espaço de largura zero,
+   * juntor, marca de ordem de bytes e espaço inquebrável. Um único deles no
+   * meio de "informações" fazia o aviso inteiro passar batido.
+   */
+  function semInvisiveis(valor) {
+    return String(valor || "")
+      .replace(/[\u200B-\u200F\u2028\u2029\uFEFF\u00AD]/g, "")
+      .replace(/[\u00A0\u2007\u202F]/g, " ")
+      .replace(/\r\n?/g, "\n");
+  }
+
+  function primeiroAviso(texto) {
+    let inicio = -1;
+    AVISOS_CONFIDENCIALIDADE.forEach((padrao) => {
+      const achado = padrao.exec(texto);
+      if (!achado || !PROVA_DE_AVISO.test(achado[0])) return;
+      if (inicio < 0 || achado.index < inicio) inicio = achado.index;
     });
-    if (inicioAviso === bruto.length) return bruto.trim();
-    return bruto.slice(0, inicioAviso)
-      .replace(/(?:rnest\s*)?www\.consagsa\.com\.br\s*$/i, "")
-      .replace(/(?:\s*(?:[-_=–—*]{3,}|aviso\s+de\s+confidencialidade\s*:|disclaimer\s*:))+$/i, "")
+    return inicio;
+  }
+
+  function fimDoBloco(texto, inicio) {
+    const resto = texto.slice(inicio);
+    const limites = [resto.search(/\n[ \t]*\n/), resto.search(RETOMADA_DE_MENSAGEM)]
+      .filter((posicao) => posicao >= 0);
+    return limites.length ? inicio + Math.min(...limites) : texto.length;
+  }
+
+  /**
+   * Retira o aviso corporativo do corpo do e-mail, em português, inglês e
+   * espanhol, sem levar junto a solicitação.
+   *
+   * Cada aviso é removido como um bloco próprio, e não do primeiro aviso até o
+   * fim do texto: numa mensagem encaminhada o pedido de verdade costuma estar
+   * *abaixo* do rodapé da mensagem de cima, e truncar ali apagava exatamente o
+   * que a equipe precisa ler. O endereço corporativo sai sempre, mesmo quando a
+   * frase do aviso não vem junto.
+   */
+  function removerAvisoConfidencialidade(valor) {
+    let atual = semInvisiveis(valor);
+    for (let volta = 0; volta < 8; volta += 1) {
+      const inicio = primeiroAviso(atual);
+      if (inicio < 0) break;
+      atual = atual.slice(0, inicio) + atual.slice(fimDoBloco(atual, inicio));
+    }
+    return atual
+      .replace(ENDERECO_CORPORATIVO, "")
+      .replace(/[ \t]*(?:aviso\s+de\s+confidencialidade|disclaimer)\s*:[ \t]*$/gim, "")
+      .replace(/^[ \t]*[-_=–—*]{3,}[ \t]*$/gm, "")
+      .replace(/[ \t]+$/gm, "")
+      .replace(/\n{3,}/g, "\n\n")
       .trim();
   }
 
@@ -170,7 +227,10 @@
       remetenteNome: analise.nome || remetente.nome || remetente.email.split("@")[0] || "Solicitante não identificado",
       remetenteEmail: analise.contato || remetente.email,
       area: analise.area || "",
-      pedido: analise.pedido || corpo || assunto || "Mensagem recebida pelo Outlook",
+      // Mensagem longa: a análise viu só o começo, então o pedido usa o corpo
+      // inteiro. Perder o final de um e-mail extenso é pior do que trazer um
+      // texto que a pessoa vai revisar de qualquer forma.
+      pedido: (analise.truncado ? corpo : analise.pedido) || corpo || assunto || "Mensagem recebida pelo Outlook",
       tipoCodigo: analise.tipoCodigo || "",
       documentos: [...(analise.documentos || []), ...(analise.titulos || [])],
     };
@@ -204,35 +264,86 @@
     });
   }
 
-  async function anexosDaPasta(pasta) {
-    const encontrados = [];
-    for await (const [nome, handle] of pasta.entries()) {
-      if (!handle || handle.kind !== "file") continue;
-      const extensao = nome.toLowerCase().split(".").pop();
-      if ([ARQUIVO_MENSAGEM, ARQUIVO_PRONTO, ARQUIVO_IMPORTADO].includes(nome.toLowerCase())) continue;
-      if (EXTENSOES_IGNORADAS.has(extensao)) continue;
-      try { encontrados.push(await handle.getFile()); } catch (_) { /* arquivo ainda sincronizando */ }
+  /**
+   * Um pacote plano é um conjunto de arquivos que compartilham o prefixo. Esta
+   * função diz a que pacote — e a que papel dentro dele — um nome pertence, para
+   * que a fila inteira seja classificada numa única varredura do diretório.
+   */
+  function classificarNomePlano(nome) {
+    const indiceAnexo = nome.indexOf(MARCADOR_ANEXO);
+    if (indiceAnexo > 0) {
+      return {
+        prefixo: nome.slice(0, indiceAnexo),
+        papel: "anexo",
+        resto: nome.slice(indiceAnexo + MARCADOR_ANEXO.length),
+      };
     }
-    encontrados.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
-    return encontrados;
+    const minusculo = nome.toLowerCase();
+    for (const arquivo of [ARQUIVO_PRONTO, ARQUIVO_MENSAGEM, ARQUIVO_IMPORTADO]) {
+      const sufixo = `${SEPARADOR_PACOTE}${arquivo}`;
+      if (minusculo.endsWith(sufixo)) {
+        return { prefixo: nome.slice(0, -sufixo.length), papel: arquivo.replace(".json", "") };
+      }
+    }
+    return null;
   }
 
-  async function anexosPlanos(pasta, prefixo) {
+  async function jsonDoHandle(entrada) {
+    if (!entrada || !entrada.handle) return null;
+    try {
+      const arquivo = await entrada.handle.getFile();
+      const lido = JSON.parse((await arquivo.text()).replace(/^\ufeff/, ""));
+      return Array.isArray(lido) ? (lido[0] || null) : lido;
+    } catch (_) { return null; }
+  }
+
+  function nomeDeAnexoUtil(resto) {
+    const minusculo = resto.toLocaleLowerCase("pt-BR");
+    if (minusculo.startsWith(MARCADOR_INLINE)) return { incorporado: true, nome: "" };
+    const nome = minusculo.startsWith(MARCADOR_NORMAL) ? resto.slice(MARCADOR_NORMAL.length) : resto;
+    const extensao = nome.toLowerCase().split(".").pop();
+    if (!nome || EXTENSOES_IGNORADAS.has(extensao)) return { incorporado: false, nome: "" };
+    return { incorporado: false, nome };
+  }
+
+  /**
+   * Abre os anexos do pacote e conta o que não conseguiu abrir.
+   *
+   * Engolir a falha de leitura era o caminho pelo qual um anexo sumia em
+   * silêncio: com o Files On-Demand do OneDrive, o arquivo na pasta é um
+   * marcador on-line, e `getFile()` só o traz de verdade se houver rede. O que
+   * falhou agora é contado e vira impedimento de registro, não um zero calado.
+   */
+  async function anexosDoGrupo(grupo) {
     const encontrados = [];
-    const inicio = `${prefixo}${MARCADOR_ANEXO}`;
-    for await (const [nome, handle] of pasta.entries()) {
-      if (!handle || handle.kind !== "file" || !nome.startsWith(inicio)) continue;
-      const nomeMarcado = nome.slice(inicio.length);
-      const nomeMinusculo = nomeMarcado.toLocaleLowerCase("pt-BR");
-      if (nomeMinusculo.startsWith(MARCADOR_INLINE)) continue;
-      const nomeOriginal = nomeMinusculo.startsWith(MARCADOR_NORMAL)
-        ? nomeMarcado.slice(MARCADOR_NORMAL.length) : nomeMarcado;
-      const extensao = nomeOriginal.toLowerCase().split(".").pop();
-      if (!nomeOriginal || EXTENSOES_IGNORADAS.has(extensao)) continue;
-      try { encontrados.push(arquivoComNome(await handle.getFile(), nomeOriginal)); } catch (_) { /* sincronização em curso */ }
+    let ilegiveis = 0;
+    let incorporados = 0;
+    for (const item of grupo.anexos) {
+      const { incorporado, nome } = nomeDeAnexoUtil(item.resto);
+      if (incorporado) { incorporados += 1; continue; }
+      if (!nome) continue;
+      try { encontrados.push(arquivoComNome(await item.handle.getFile(), nome)); }
+      catch (_) { ilegiveis += 1; }
     }
     encontrados.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
-    return encontrados;
+    return { anexos: encontrados, ilegiveis, incorporados };
+  }
+
+  async function anexosDaPasta(pasta) {
+    const encontrados = [];
+    let ilegiveis = 0;
+    let incorporados = 0;
+    for await (const [nome, handle] of pasta.entries()) {
+      if (!handle || handle.kind !== "file") continue;
+      if ([ARQUIVO_MENSAGEM, ARQUIVO_PRONTO, ARQUIVO_IMPORTADO].includes(nome.toLowerCase())) continue;
+      const { incorporado, nome: util } = nomeDeAnexoUtil(nome);
+      if (incorporado) { incorporados += 1; continue; }
+      if (!util) continue;
+      try { encontrados.push(arquivoComNome(await handle.getFile(), util)); }
+      catch (_) { ilegiveis += 1; }
+    }
+    encontrados.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    return { anexos: encontrados, ilegiveis, incorporados };
   }
 
   function documentosDosAnexos(arquivos) {
@@ -244,50 +355,108 @@
     return Docs && Docs.chave ? Docs.chave(valor) : texto(valor).toUpperCase();
   }
 
+  /**
+   * O pacote só pode ser registrado quando está inteiro.
+   *
+   * O marcador da versão 2 traz `attachment_count`, gravado pelo Power Automate
+   * depois de criar os arquivos. Comparar esse número com o que a fila tem é a
+   * única forma de distinguir "o e-mail não tinha anexo" de "o anexo ainda não
+   * sincronizou". Pacote da versão 1, sem contagem, mantém o comportamento
+   * anterior — mas um arquivo ilegível continua impedindo o registro.
+   */
+  function impedimentoDoPacote(pronto, presentes, leitura) {
+    const esperados = Number(pronto && pronto.attachment_count);
+    if (Number.isFinite(esperados) && esperados > presentes) {
+      const faltam = esperados - presentes;
+      return `Pacote incompleto: ${faltam} de ${esperados} anexo(s) ainda não chegaram à fila. Aguarde a sincronização do OneDrive.`;
+    }
+    if (leitura.ilegiveis) {
+      return `${leitura.ilegiveis} anexo(s) estão na pasta mas não puderam ser lidos. Marque a pasta como “Sempre manter neste dispositivo” e sincronize de novo.`;
+    }
+    return "";
+  }
+
   async function carregarPacote(nome, pasta) {
     if (!await arquivoDaPasta(pasta, ARQUIVO_PRONTO)) return null;
     const mensagem = await jsonDaPasta(pasta, ARQUIVO_MENSAGEM);
     if (!mensagem) return { nome, pasta, erro: "mensagem.json inválido ou indisponível." };
+    const pronto = await jsonDaPasta(pasta, ARQUIVO_PRONTO);
     const importado = await jsonDaPasta(pasta, ARQUIVO_IMPORTADO);
-    const anexos = await anexosDaPasta(pasta);
+    const leitura = await anexosDaPasta(pasta);
     const dados = normalizarMensagem(mensagem, nome);
-    dados.documentos = [...new Set([...dados.documentos, ...documentosDosAnexos(anexos)].map(texto).filter(Boolean))];
+    dados.documentos = [...new Set([...dados.documentos, ...documentosDosAnexos(leitura.anexos)].map(texto).filter(Boolean))];
+    // "Presentes" conta tudo que está na pasta — inclusive a assinatura e o que
+    // não pôde ser aberto —, porque é isso que a contagem do marcador declara.
+    const presentes = leitura.anexos.length + leitura.incorporados + leitura.ilegiveis;
+    const incompleto = impedimentoDoPacote(pronto, presentes, leitura);
     return {
-      nome, pasta, mensagem, dados, anexos, importado,
+      nome, pasta, mensagem, dados, anexos: leitura.anexos, importado,
+      incorporados: leitura.incorporados, incompleto,
       importadoNome: ARQUIVO_IMPORTADO,
-      selecionado: !importado, erro: "",
+      selecionado: !importado && !incompleto, erro: "",
     };
   }
 
-  async function carregarPacotePlano(prefixo, pasta) {
-    const prontoNome = nomePlano(prefixo, ARQUIVO_PRONTO);
-    if (!await arquivoDaPasta(pasta, prontoNome)) return null;
-    const mensagemNome = nomePlano(prefixo, ARQUIVO_MENSAGEM);
+  async function carregarPacotePlano(prefixo, grupo) {
     const importadoNome = nomePlano(prefixo, ARQUIVO_IMPORTADO);
-    const mensagem = await jsonDaPasta(pasta, mensagemNome);
-    if (!mensagem) return { nome: prefixo, pasta, importadoNome, erro: `${mensagemNome} inválido ou indisponível.` };
-    const importado = await jsonDaPasta(pasta, importadoNome);
-    const anexos = await anexosPlanos(pasta, prefixo);
+    const base = { nome: prefixo, pasta: handleFila, importadoNome };
+    const pronto = await jsonDoHandle(grupo.pronto);
+    if (!pronto) {
+      return { ...base, erro: `${nomePlano(prefixo, ARQUIVO_PRONTO)} ainda não pôde ser lido. Aguarde a sincronização do OneDrive.` };
+    }
+    if (!grupo.mensagem) {
+      return { ...base, erro: `${nomePlano(prefixo, ARQUIVO_MENSAGEM)} ainda não chegou à fila.` };
+    }
+    const mensagem = await jsonDoHandle(grupo.mensagem);
+    if (!mensagem) {
+      return { ...base, erro: `${nomePlano(prefixo, ARQUIVO_MENSAGEM)} inválido ou indisponível.` };
+    }
+    const importado = await jsonDoHandle(grupo.importado);
+    const leitura = await anexosDoGrupo(grupo);
     const dados = normalizarMensagem(mensagem, prefixo);
-    dados.documentos = [...new Set([...dados.documentos, ...documentosDosAnexos(anexos)].map(texto).filter(Boolean))];
+    dados.documentos = [...new Set([...dados.documentos, ...documentosDosAnexos(leitura.anexos)].map(texto).filter(Boolean))];
+    const incompleto = impedimentoDoPacote(pronto, grupo.anexos.length, leitura);
     return {
-      nome: prefixo, pasta, mensagem, dados, anexos, importado, importadoNome,
-      selecionado: !importado, erro: "",
+      ...base, mensagem, dados, anexos: leitura.anexos, importado,
+      incorporados: leitura.incorporados, incompleto,
+      selecionado: !importado && !incompleto, erro: "",
     };
   }
 
+  /**
+   * Lê a fila inteira numa varredura só.
+   *
+   * A versão anterior reenumerava o diretório para cada pacote ao procurar os
+   * anexos pelo prefixo: com a fila crescendo — e nada a limpa — o custo subia
+   * ao quadrado e "Sincronizar" passava a levar minutos. Agora o diretório é
+   * percorrido uma vez e os arquivos são agrupados pelo prefixo em memória.
+   */
   async function lerFila() {
-    const resultado = [];
+    const grupos = new Map();
+    const pastas = [];
     for await (const [nome, handle] of handleFila.entries()) {
       if (!handle) continue;
-      let pacote = null;
-      if (handle.kind === "directory") pacote = await carregarPacote(nome, handle);
-      else if (handle.kind === "file" && nome.toLowerCase().endsWith(`${SEPARADOR_PACOTE}${ARQUIVO_PRONTO}`)) {
-        const prefixo = nome.slice(0, -(`${SEPARADOR_PACOTE}${ARQUIVO_PRONTO}`).length);
-        if (prefixo) pacote = await carregarPacotePlano(prefixo, handleFila);
-      }
+      if (handle.kind === "directory") { pastas.push([nome, handle]); continue; }
+      if (handle.kind !== "file") continue;
+      const parte = classificarNomePlano(nome);
+      if (!parte || !parte.prefixo) continue;
+      if (!grupos.has(parte.prefixo)) grupos.set(parte.prefixo, { anexos: [] });
+      const grupo = grupos.get(parte.prefixo);
+      if (parte.papel === "anexo") grupo.anexos.push({ nome, handle, resto: parte.resto });
+      else grupo[parte.papel] = { nome, handle };
+    }
+
+    const resultado = [];
+    for (const [nome, handle] of pastas) {
+      const pacote = await carregarPacote(nome, handle);
       if (pacote) resultado.push(pacote);
     }
+    for (const [prefixo, grupo] of grupos) {
+      // Sem `__pronto.json` o Power Automate ainda não terminou de gravar.
+      if (!grupo.pronto) continue;
+      resultado.push(await carregarPacotePlano(prefixo, grupo));
+    }
+
     resultado.sort((a, b) => {
       const ai = Boolean(a.importado && a.importado.status === "concluido");
       const bi = Boolean(b.importado && b.importado.status === "concluido");
@@ -318,7 +487,9 @@
   }
 
   function seletorTipo(indice, selecionado) {
-    const seletor = elemento("select", { id: idCampo(indice, "tipo"), "aria-label": "Tipo de solicitação" });
+    // Sem `aria-label`: o <label for> já diz "Tipo *", e o rótulo ARIA vencia o
+    // visível, escondendo do leitor de tela que o campo é obrigatório.
+    const seletor = elemento("select", { id: idCampo(indice, "tipo"), required: true });
     seletor.append(elemento("option", { value: "", text: "Escolha o tipo…" }));
     tiposAtuais.filter((tipo) => tipo.active !== false).forEach((tipo) => {
       seletor.append(elemento("option", { value: tipo.code, text: tipo.label, selected: tipo.code === selecionado }));
@@ -327,17 +498,31 @@
   }
 
   function alternarPacote(indice, marcado) {
-    if (!pacotes[indice] || pacotes[indice].importado || pacotes[indice].erro) return;
-    pacotes[indice].selecionado = marcado;
+    const pacote = pacotes[indice];
+    if (!pacote || pacote.importado || pacote.erro || pacote.incompleto) return;
+    pacote.selecionado = marcado;
     atualizarResumoSelecao();
   }
 
   function atualizarResumoSelecao() {
-    const marcados = pacotes.filter((pacote) => pacote.selecionado && !pacote.importado && !pacote.erro).length;
+    const marcados = pacotes.filter(selecionavel).length;
     const botao = document.getElementById("outlook-importar");
     const resumo = document.getElementById("outlook-selecao-resumo");
     if (botao) { botao.disabled = !marcados || importando; botao.textContent = importando ? "Registrando…" : `Registrar selecionados (${marcados})`; }
     if (resumo) resumo.textContent = marcados ? `${marcados} e-mail(s) pronto(s) para revisão e registro.` : "Selecione pelo menos um e-mail pendente.";
+  }
+
+  function avisosDoPacote(pacote) {
+    return (pacote.importado && pacote.importado.warnings) || [];
+  }
+
+  /** Um pacote entra no lote quando está inteiro, pendente e sem erro de leitura. */
+  function selecionavel(pacote) {
+    return Boolean(pacote)
+      && pacote.selecionado
+      && !pacote.erro
+      && !pacote.incompleto
+      && !(pacote.importado && pacote.importado.status === "concluido");
   }
 
   function cartaoPacote(pacote, indice) {
@@ -351,15 +536,18 @@
     const parcial = Boolean(pacote.importado && !concluido);
     const totalBytes = pacote.anexos.reduce((total, arquivo) => total + Number(arquivo.size || 0), 0);
     const caixa = elemento("input", {
-      type: "checkbox", checked: pacote.selecionado, disabled: concluido,
+      type: "checkbox", checked: pacote.selecionado,
+      disabled: concluido || Boolean(pacote.incompleto),
       "aria-label": `Selecionar ${pacote.dados.assunto}`,
       onchange: (evento) => alternarPacote(indice, evento.target.checked),
     });
     const status = concluido
       ? elemento("span", { class: "flow-selo ok", text: pacote.importado.protocol || "Importado" })
-      : parcial
-        ? elemento("span", { class: "flow-selo validar", text: "Continuar importação" })
-        : elemento("span", { class: "flow-selo acao", text: "Pendente" });
+      : pacote.incompleto
+        ? elemento("span", { class: "flow-selo alerta", text: "Incompleto" })
+        : parcial
+          ? elemento("span", { class: "flow-selo validar", text: "Continuar importação" })
+          : elemento("span", { class: "flow-selo acao", text: "Pendente" });
     const campos = concluido ? null : elemento("div", { class: "flow-outlook-campos" }, [
       elemento("label", { class: "flow-campo", for: idCampo(indice, "tipo") }, [
         elemento("span", { text: "Tipo *" }), seletorTipo(indice, pacote.dados.tipoCodigo),
@@ -369,8 +557,13 @@
         elemento("input", { id: idCampo(indice, "nome"), value: pacote.dados.remetenteNome }),
       ]),
       elemento("label", { class: "flow-campo", for: idCampo(indice, "contato") }, [
-        elemento("span", { text: "Contato" }),
-        elemento("input", { id: idCampo(indice, "contato"), value: pacote.dados.remetenteEmail }),
+        // Obrigatório porque `flow_create_staff_request` recusa e-mail inválido.
+        // Pedir aqui é melhor do que deixar o erro do banco aparecer no meio do lote.
+        elemento("span", { text: "E-mail do solicitante *" }),
+        elemento("input", {
+          id: idCampo(indice, "contato"), type: "email", required: true,
+          value: pacote.dados.remetenteEmail,
+        }),
       ]),
       elemento("label", { class: "flow-campo", for: idCampo(indice, "area") }, [
         elemento("span", { text: "Área / setor" }),
@@ -400,9 +593,20 @@
       elemento("div", { class: "flow-outlook-meta" }, [
         elemento("span", { text: `${pacote.anexos.length} anexo(s)` }),
         elemento("span", { text: tamanho(totalBytes) }),
+        pacote.incorporados
+          ? elemento("span", { text: `${pacote.incorporados} imagem(ns) da assinatura ignorada(s)` }) : null,
         concluido && pacote.importado.imported_at
           ? elemento("span", { text: `Registrado em ${dataRecebida(pacote.importado.imported_at)}` }) : null,
       ]),
+      pacote.incompleto
+        ? elemento("p", { class: "flow-outlook-status erro", text: pacote.incompleto }) : null,
+      // Os avisos deixam de ser só um número no rodapé: o operador precisa saber
+      // *qual* anexo ficou de fora para decidir o que fazer com ele.
+      avisosDoPacote(pacote).length
+        ? elemento("details", { class: "flow-outlook-anexos" }, [
+          elemento("summary", { text: `${avisosDoPacote(pacote).length} aviso(s) desta importação` }),
+          elemento("ul", {}, avisosDoPacote(pacote).map((aviso) => elemento("li", { text: aviso }))),
+        ]) : null,
       campos,
       pacote.anexos.length ? elemento("details", { class: "flow-outlook-anexos" }, [
         elemento("summary", { text: "Ver anexos" }),
@@ -465,7 +669,17 @@
       if (!await permissao(handleFila, true)) throw new Error("Autorize novamente o acesso à fila do OneDrive.");
       atualizarConexao("Lendo os pacotes concluídos…", "carregando");
       pacotes = await lerFila();
-      atualizarConexao(`Fila conectada: ${handleFila.name} · ${pacotes.length} pacote(s)`, "ok");
+      // Saber a hora da última leitura é o que revela um fluxo do Power Automate
+      // que parou: sem isso, uma fila vazia por pane e uma fila vazia por
+      // tranquilidade são a mesma tela.
+      const hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      const pendentes = pacotes.filter((pacote) => selecionavel(pacote) || (!pacote.importado && !pacote.erro)).length;
+      const incompletos = pacotes.filter((pacote) => pacote.incompleto).length;
+      atualizarConexao(
+        `Fila conectada: ${handleFila.name} · ${pacotes.length} pacote(s), ${pendentes} pendente(s)`
+        + `${incompletos ? `, ${incompletos} incompleto(s)` : ""} · última sincronização às ${hora}`,
+        incompletos ? "atencao" : "ok"
+      );
       desenharFila();
     } catch (erro) {
       atualizarConexao("A fila precisa ser conectada novamente.", "erro");
@@ -523,6 +737,11 @@
     if (!(marcador && marcador.request_id)) {
       if (!tipo) throw new Error(`Escolha o tipo de “${pacote.dados.assunto}”.`);
       if (!nome) throw new Error(`Informe o solicitante de “${pacote.dados.assunto}”.`);
+      // O banco recusa contato vazio ou malformado. Conferir aqui transforma um
+      // erro de RPC no meio do lote numa frase que aponta o campo.
+      if (!EMAIL_VALIDO.test(contato)) {
+        throw new Error(`Informe um e-mail válido para o solicitante de “${pacote.dados.assunto}”.`);
+      }
       if (!pedido) throw new Error(`Informe o pedido de “${pacote.dados.assunto}”.`);
     }
 
@@ -540,7 +759,9 @@
         descricao: pedido,
         formulario: {
           pedido_resumido: pedido,
-          origem_preenchimento: "outlook_onedrive",
+          // O `case` de `flow_create_staff_request` reconhece este valor; com
+          // qualquer outro, o rótulo gravado perde a origem Outlook.
+          origem_preenchimento: "integracao_outlook",
           canal_origem: "outlook",
           outlook_external_id: pacote.dados.externalId,
           outlook_subject: pacote.dados.assunto,
@@ -570,7 +791,9 @@
       : Array.isArray(solicitacao.request_items) ? solicitacao.request_items : [];
     const jaEnviados = new Set([
       ...(marcador.uploaded_files || []),
-      ...((solicitacao.anexos || []).map((anexo) => `${texto(anexo.original_name)}\u0000${Number(anexo.file_size) || 0}`)),
+      // `flow_attachments` guarda `file_name` e `size_bytes`. Ler `original_name`
+      // e `file_size` devolvia sempre undefined, e a retomada reenviava tudo.
+      ...((solicitacao.anexos || []).map((anexo) => `${texto(anexo.file_name)}\u0000${Number(anexo.size_bytes) || 0}`)),
     ]);
     const avisos = [...(marcador.warnings || [])];
 
@@ -614,33 +837,48 @@
     return { data: solicitacao, avisos: marcador.warnings };
   }
 
+  /**
+   * Registra os pacotes selecionados, um a um, sem deixar que a falha de um
+   * interrompa os demais.
+   *
+   * Antes, a primeira exceção abortava o laço: um cartão sem tipo escolhido
+   * segurava todos os outros, e o operador precisava descobrir por tentativa
+   * qual era. Agora cada pacote é tentado, o que falhou é nomeado no fim, e o
+   * que deu certo permanece registrado.
+   */
   async function importarSelecionados() {
     if (importando) return;
-    const selecionados = pacotes.map((pacote, indice) => ({ pacote, indice }))
-      .filter(({ pacote }) => pacote.selecionado && !(pacote.importado && pacote.importado.status === "concluido") && !pacote.erro);
+    const selecionados = pacotes
+      .map((pacote, indice) => ({ pacote, indice }))
+      .filter(({ pacote }) => selecionavel(pacote));
     if (!selecionados.length) return;
     importando = true;
     atualizarResumoSelecao();
     const progresso = document.getElementById("outlook-importacao-status");
     const resultados = [];
+    const falhas = [];
     try {
       for (let posicao = 0; posicao < selecionados.length; posicao += 1) {
         const { pacote, indice } = selecionados[posicao];
         progresso.className = "flow-outlook-status carregando";
         progresso.textContent = `Registrando e-mail ${posicao + 1} de ${selecionados.length}…`;
-        resultados.push(await importarPacote(pacote, indice, progresso));
+        try {
+          resultados.push(await importarPacote(pacote, indice, progresso));
+        } catch (erro) {
+          falhas.push(erro && erro.message ? erro.message : `Falha ao registrar “${pacote.dados.assunto}”.`);
+        }
       }
       const avisos = resultados.flatMap((resultado) => resultado.avisos || []);
-      progresso.className = `flow-outlook-status ${avisos.length ? "atencao" : "ok"}`;
-      progresso.textContent = `${resultados.length} solicitação(ões) registrada(s).${avisos.length ? ` ${avisos.length} aviso(s) para conferência.` : ""}`;
-      avisar(`${resultados.length} solicitação(ões) importada(s) do Outlook.`, "ok");
+      const partes = [`${resultados.length} solicitação(ões) registrada(s).`];
+      if (avisos.length) partes.push(`${avisos.length} aviso(s) para conferência — abra o cartão para ver quais.`);
+      if (falhas.length) partes.push(`${falhas.length} não registrada(s): ${falhas.join(" ")}`);
+      progresso.className = `flow-outlook-status ${falhas.length ? "erro" : avisos.length ? "atencao" : "ok"}`;
+      progresso.textContent = partes.join(" ");
+      if (resultados.length) avisar(`${resultados.length} solicitação(ões) importada(s) do Outlook.`, "ok");
+      if (falhas.length) avisar(falhas[0], "erro");
       if (typeof aoRegistrarAtual === "function" && resultados.length) {
         await aoRegistrarAtual(resultados[resultados.length - 1].data);
       }
-    } catch (erro) {
-      progresso.className = "flow-outlook-status erro";
-      progresso.textContent = erro.message || "A importação foi interrompida. Tente novamente; o protocolo já criado não será duplicado.";
-      avisar(progresso.textContent, "erro");
     } finally {
       importando = false;
       desenharFila();
@@ -683,9 +921,9 @@
         elemento("div", { class: "flow-outlook-orientacao" }, [
           elemento("strong", { text: "Uso diário" }),
           elemento("ol", {}, [
-            elemento("li", { text: "Mova o e-mail para GRCON Flow \\ Entrada na caixa compartilhada." }),
-            elemento("li", { text: "Aguarde até 5 minutos e clique em Sincronizar e-mails." }),
-            elemento("li", { text: "Confira os campos e registre os selecionados." }),
+            elemento("li", { text: "Mova o e-mail para a pasta GRCON Flow \\ Entrada no Outlook." }),
+            elemento("li", { text: "Aguarde até 5 minutos — é a recorrência do Power Automate — e clique em Sincronizar e-mails." }),
+            elemento("li", { text: "Confira os campos e registre os selecionados. Pacote marcado como Incompleto espera a sincronização do OneDrive." }),
           ]),
         ]),
         elemento("div", { id: "outlook-lista", class: "flow-outlook-lista" }),
@@ -704,5 +942,8 @@
 
   root.FlowOutlookSync = Object.freeze({
     montar, normalizarMensagem, removerAvisoConfidencialidade, uuidDeterministico,
+    // Expostas para teste: são as duas decisões que, erradas, fazem um anexo
+    // sumir sem ninguém perceber.
+    nomeDeAnexoUtil, impedimentoDoPacote,
   });
 })(window);

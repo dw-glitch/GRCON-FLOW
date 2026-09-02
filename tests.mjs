@@ -1796,10 +1796,19 @@ check("pacotes incompletos não entram e a repetição não duplica protocolo", 
     "os anexos planos devem ser agrupados pelo prefixo do pacote");
   assert.match(importador, /const MARCADOR_INLINE = "true__"/,
     "imagens incorporadas da assinatura devem ser reconhecidas na fila plana");
-  assert.match(importador, /if \(nomeMinusculo\.startsWith\(MARCADOR_INLINE\)\) continue/,
-    "anexos incorporados não podem entrar no GRCON Flow");
-  assert.match(importador, /nomeMarcado\.slice\(MARCADOR_NORMAL\.length\)/,
-    "o marcador booleano deve ser retirado do nome dos anexos normais");
+  // Comportamento, não texto: o marcador `true__` sai da lista, o `false__` some
+  // do nome, e a capitalização do conector não pode mudar a decisão.
+  assert.deepEqual(OutlookSync.nomeDeAnexoUtil("true__logo-assinatura.png"),
+    { incorporado: true, nome: "" }, "imagem incorporada não entra no GRCON Flow");
+  assert.deepEqual(OutlookSync.nomeDeAnexoUtil("True__logo-assinatura.png"),
+    { incorporado: true, nome: "" }, "o conector também devolve True com maiúscula");
+  assert.deepEqual(OutlookSync.nomeDeAnexoUtil("false__relatório (rev A).pdf"),
+    { incorporado: false, nome: "relatório (rev A).pdf" },
+    "o marcador booleano sai do nome exibido, com acento e parêntese intactos");
+  assert.deepEqual(OutlookSync.nomeDeAnexoUtil("false__PLANILHA.XLSX"),
+    { incorporado: false, nome: "PLANILHA.XLSX" }, "extensão em maiúsculas é aceita");
+  assert.deepEqual(OutlookSync.nomeDeAnexoUtil("false__config.json"),
+    { incorporado: false, nome: "" }, "arquivo de controle não vira anexo");
   assert.match(importador, /const ARQUIVO_IMPORTADO = "importado\.json"/);
   assert.match(importador, /uuidDeterministico\(`outlook:\$\{pacote\.dados\.externalId\}`\)/);
   assert.match(importador, /_client_request_id: clientRequestId/);
@@ -1857,6 +1866,267 @@ check("o fluxo documentado usa somente conectores padrão e nunca apaga e-mail",
   assert.match(guia, /Controle de simultaneidade: ativado, grau `1`/);
   assert.doesNotMatch(guia, /\.ps1|Invoke-WebRequest|flow-external-intake/i);
   assert.match(guia, /nunca apaga mensagens/i);
+});
+
+// ── Correções da auditoria: comportamento, não texto de arquivo ────────────
+//
+// Os testes desta seção executam as funções. Os que conferiam apenas a presença
+// de uma string no arquivo passavam com o comportamento quebrado — foi assim que
+// o descarte de código no navegador e a chave de retomada com o nome errado de
+// coluna atravessaram 112 verificações verdes.
+
+check("nenhuma linha de documento é descartada no navegador", () => {
+  // A consulta às LDs vigentes só existe no servidor. Jogar fora aqui o que não
+  // casa com o regex local é decidir antes de perguntar.
+  const linhas = [
+    "MA-5290.00-22000-ABC-C1O-001",
+    "MA-5290.00-22000-ABC-XYZ-001",
+    "MA-5290.00-22000-ABC-C1O-01",
+    "C1O_RNEST_U32_3.1.1.1_XXX_RIR_SPE-AST-320019",
+    "LD_004_REV_12",
+    "ABC-123-QUALQUER-COISA",
+    "VM-322567",
+    "Relatório de inspeção do vaso",
+  ];
+  const itens = Docs.daListaFlexivel(linhas.join("\n"));
+  assert.equal(itens.length, linhas.length,
+    "toda linha não vazia precisa virar exatamente um item");
+  itens.forEach((item, indice) => {
+    assert.ok(item.document || item.requested_title,
+      `a linha ${indice + 1} chegou sem código e sem título`);
+  });
+});
+
+check("a forma originalmente recebida viaja junto para a auditoria", () => {
+  const [corrigido] = Docs.daListaFlexivel("PR_5290.00_22313_175_C1O_040_0001_RIR.pdf");
+  assert.equal(corrigido.document, "PR-5290.00-22313-175-C1O-040");
+  assert.equal(corrigido.reference, "PR_5290.00_22313_175_C1O_040_0001_RIR.pdf",
+    "sem a forma recebida não há como auditar a correção");
+
+  const [naoNormativo] = Docs.daListaFlexivel("LD_004_REV_12");
+  assert.equal(naoNormativo.document, "LD_004_REV_12",
+    "o texto segue para o servidor decidir, na forma em que chegou");
+  assert.equal(naoNormativo.reference, "LD_004_REV_12");
+});
+
+check("código com título continua separando as duas informações", () => {
+  const [item] = Docs.daListaFlexivel("MA-5290.00-22000-ABC-C1O-001\tMemorial de cálculo do pórtico");
+  assert.equal(item.document, "MA-5290.00-22000-ABC-C1O-001");
+  assert.equal(item.requested_title, "Memorial de cálculo do pórtico");
+  assert.equal(item.reference, "MA-5290.00-22000-ABC-C1O-001");
+});
+
+check("o rodapé confidencial sai nos três idiomas e nas variantes de redação", () => {
+  const remover = OutlookSync.removerAvisoConfidencialidade;
+  const casos = [
+    ["nesta mensagem e seus anexos pertencem ao Grupo Andrade Gutierrez, são confidenciais."],
+    ["nessa mensagem ou o conteúdo de seus eventuais anexos pertencem ao Grupo Andrade Gutierrez, são confidenciais."],
+    ["nesta mensagem ou seus anexos pertencem ao GRUPO ANDRADE GUTIERREZ e são confidenciais."],
+  ].map(([cauda]) => `As informações contidas ${cauda}`);
+  casos.push("The information contained in this message or in any of its attachments belongs to the Andrade Gutierrez Group, is confidential.");
+  casos.push("La información contenida en este mensaje o en sus anexos pertenece al Grupo Andrade Gutierrez, es confidencial.");
+
+  casos.forEach((aviso) => {
+    const limpo = remover(`Favor realizar a postagem do documento.\n\n${aviso}`);
+    assert.equal(limpo, "Favor realizar a postagem do documento.",
+      `o aviso não saiu: ${aviso.slice(0, 48)}…`);
+  });
+});
+
+check("o aviso sai mesmo com caractere invisível no meio da palavra", () => {
+  // O Outlook insere espaço de largura zero conforme a mensagem é reencaminhada.
+  // Um único deles fazia o padrão inteiro deixar de casar.
+  const aviso = "As informa​ções contidas nessa mensagem ou o conteúdo de seus"
+    + " eventuais anexos pertencem ao Grupo Andrade Gutierrez, são confidenciais.";
+  assert.equal(OutlookSync.removerAvisoConfidencialidade(`Preciso postar o RIR.\n\n${aviso}`),
+    "Preciso postar o RIR.");
+});
+
+check("o endereço corporativo sai mesmo sem o texto do aviso", () => {
+  const remover = OutlookSync.removerAvisoConfidencialidade;
+  assert.equal(remover("Segue o pedido.\n\nRNESTwww.consagsa.com.br"), "Segue o pedido.");
+  assert.equal(remover("Segue o pedido.\n\nhttps://www.consagsa.com.br"), "Segue o pedido.");
+});
+
+check("numa cadeia encaminhada, o pedido abaixo do rodapé é preservado", () => {
+  // É o caso mais comum quando o solicitante repassa uma conversa: truncar do
+  // primeiro aviso até o fim apagava justamente o que a equipe precisa ler.
+  const corpo = [
+    "Encaminho abaixo.",
+    "",
+    "The information contained in this message belongs to the Andrade Gutierrez Group, is confidential.",
+    "",
+    "De: solicitante",
+    "Favor incluir o documento na LD e alocar.",
+  ].join("\n");
+  const limpo = OutlookSync.removerAvisoConfidencialidade(corpo);
+  assert.match(limpo, /Favor incluir o documento na LD e alocar\./,
+    "o pedido de verdade não pode ser cortado junto com o rodapé");
+  assert.doesNotMatch(limpo, /Andrade Gutierrez/);
+});
+
+check("dois avisos acumulados saem sem levar o texto entre eles", () => {
+  const aviso = "As informações contidas nesta mensagem ou seus anexos pertencem ao Grupo Andrade Gutierrez, são confidenciais.";
+  const corpo = `Primeiro pedido.\n\n${aviso}\n\nSegundo pedido.\n\n${aviso}`;
+  const limpo = OutlookSync.removerAvisoConfidencialidade(corpo);
+  assert.match(limpo, /Primeiro pedido\./);
+  assert.match(limpo, /Segundo pedido\./);
+  assert.doesNotMatch(limpo, /Andrade Gutierrez/);
+});
+
+check("texto legítimo com “confidencial”, “anexo” e o nome do grupo é preservado", () => {
+  // A âncora do nome do grupo dentro de uma janela curta é o que separa o rodapé
+  // corporativo de uma frase comum. Afrouxar os padrões sem esta guarda apagaria
+  // pedidos verdadeiros.
+  const pedido = "Preciso do relatório confidencial da Andrade Gutierrez que está em anexo.";
+  assert.equal(OutlookSync.removerAvisoConfidencialidade(pedido), pedido);
+});
+
+check("mensagem longa não perde o final em silêncio", () => {
+  const corpo = `Favor postar.\n${"detalhe do escopo. ".repeat(1600)}\nFim do pedido.`;
+  assert.ok(corpo.length > 20000, "o caso precisa passar do limite de análise");
+  const analise = QuickParse.analisar(corpo, { tipos: [] });
+  assert.equal(analise.truncado, true, "quem chama precisa saber que houve corte");
+
+  const mensagem = OutlookSync.normalizarMensagem({
+    id: "longa", subject: "Pedido extenso", body: corpo,
+    from: { emailAddress: { name: "Solicitante", address: "solicitante@agnet.com.br" } },
+  }, "longa");
+  assert.match(mensagem.pedido, /Fim do pedido\./,
+    "com a análise truncada, o pedido precisa usar o corpo inteiro");
+});
+
+check("a cópia para a planilha não quebra colunas nem vira fórmula", () => {
+  // O "Corpo do e-mail" carrega texto de quem mandou a mensagem: quebra de linha
+  // desalinha as 26 colunas ao colar, e `=` é avaliado pelo Excel.
+  const celula = Report.clipboardCell;
+  assert.equal(celula("linha 1\nlinha 2\tfim"), "linha 1 linha 2 fim");
+  assert.equal(celula("=HYPERLINK(\"http://exemplo\")"), "'=HYPERLINK(\"http://exemplo\")");
+  assert.equal(celula("+55 11 0000-0000"), "'+55 11 0000-0000");
+  assert.equal(celula("-3 dias"), "'-3 dias");
+  assert.equal(celula("@usuario"), "'@usuario");
+  assert.equal(celula("MA-5290.00-22000-ABC-C1O-001"), "MA-5290.00-22000-ABC-C1O-001",
+    "código de documento não pode ganhar apóstrofo");
+
+  const linha = Export.linhaDoControle({
+    description: "Favor postar.\nSegue anexo.", requester_name: "Solicitante",
+  }, 0);
+  const texto = Export.copiar([linha], false);
+  assert.equal(texto.split("\n").length, 1, "uma solicitação, uma linha colada");
+  assert.equal(texto.split("\t").length, 26, "as 26 colunas precisam sobreviver ao corpo do e-mail");
+});
+
+check("a policy do Storage aceita as mesmas extensões que a tela oferece", () => {
+  // O portão que roda primeiro no envio é a policy de `storage.objects`, e foi o
+  // único que a flow_32 não atualizou — por isso imagem era recusada em produção
+  // enquanto o teste dos "quatro portões" continuava verde.
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_49_anexo_de_imagem_no_storage.sql"), "utf8");
+  const lista = migracao.match(/lower\(substring\(name from '[^']+'\)\) = any \(array\[([\s\S]*?)\]::text\[\]\)/);
+  assert.ok(lista, "a policy precisa restringir por extensão");
+  const api = fs.readFileSync(path.join(root, "flow_api.js"), "utf8");
+  const oferecidas = api.match(/const EXTENSOES_ANEXO = Object\.freeze\(\[([\s\S]*?)\]\)/);
+  const imagens = api.match(/const EXTENSOES_IMAGEM = Object\.freeze\(\[([^\]]*)\]\)/);
+  assert.ok(oferecidas && imagens);
+  const doBanco = [...lista[1].matchAll(/'([a-z]+)'/g)].map((achado) => achado[1]);
+  const daTela = [
+    ...[..."pdf,xls,xlsx,xlsm,doc,docx,dwg".matchAll(/[a-z]+/g)].map((a) => a[0]),
+    ...[...imagens[1].matchAll(/"([a-z]+)"/g)].map((achado) => achado[1]),
+  ];
+  daTela.forEach((extensao) => {
+    assert.ok(doBanco.includes(extensao), `a policy do Storage recusa .${extensao}`);
+  });
+});
+
+check("a validação normativa e a correção do código concordam sobre o emitente", () => {
+  // `flow_repair_document_code` aceitava qualquer trinca no penúltimo grupo da
+  // N-1710 e `flow_document_code_is_normative` exigia `C1O`: um documento
+  // legítimo de outro emitente, ausente das LDs, era apagado em vez de virar novo.
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_50_triagem_normativa_e_idempotencia_do_outlook.sql"), "utf8");
+  assert.doesNotMatch(migracao, /-C1O-\[0-9\]\{3,4\}\$/,
+    "o emitente é regra de catálogo versionado, não literal na validação normativa");
+  assert.match(migracao, /-\[A-Z0-9\]\{3\}-\[A-Z0-9\]\{3\}-\[0-9\]\{3,4\}\$/,
+    "a validação precisa aceitar a mesma estrutura que a correção reconhece");
+
+  // A mesma estrutura precisa ser reconhecida pelo motor documental do navegador.
+  ["MA-5290.00-22000-ABC-C1O-001", "MA-5290.00-22000-ABC-XYZ-001"].forEach((codigo) => {
+    assert.equal(Docs.corrigirCodigoParaTriagem(codigo), codigo,
+      `${codigo} precisa ser reconhecido como N-1710`);
+  });
+});
+
+check("um e-mail vira um protocolo, mesmo importado por duas pessoas", () => {
+  const migracao = fs.readFileSync(
+    path.join(root, "database/migrations/flow_50_triagem_normativa_e_idempotencia_do_outlook.sql"), "utf8");
+  assert.match(migracao, /create unique index if not exists flow_requests_outlook_external_uidx/,
+    "a chave do e-mail precisa ser única no banco inteiro, não por usuário");
+  assert.doesNotMatch(migracao.match(/create unique index[\s\S]*?;/)[0], /submitted_by_id/,
+    "o índice do Outlook não pode depender de quem importou");
+  assert.match(migracao, /r\.form_data->>'outlook_external_id' = chave_outlook/,
+    "a RPC precisa procurar pelo e-mail antes de gerar protocolo novo");
+});
+
+check("a chave de retomada usa as colunas que o banco realmente tem", () => {
+  // `flow_attachments` guarda `file_name` e `size_bytes`. Ler `original_name` e
+  // `file_size` devolvia undefined, e a retomada reenviava todos os anexos.
+  const importador = fs.readFileSync(path.join(root, "flow_outlook_sync.js"), "utf8");
+  assert.match(importador, /anexo\.file_name/);
+  assert.match(importador, /anexo\.size_bytes/);
+  assert.doesNotMatch(importador, /anexo\.original_name|anexo\.file_size/,
+    "nomes de coluna inexistentes tornam a comparação sempre falsa");
+});
+
+check("pacote incompleto não pode ser registrado", () => {
+  const importador = fs.readFileSync(path.join(root, "flow_outlook_sync.js"), "utf8");
+  assert.match(importador, /attachment_count/,
+    "sem a contagem declarada no marcador não há como saber que falta anexo");
+  assert.match(importador, /function impedimentoDoPacote/);
+  assert.match(importador, /catch \(_\) \{ ilegiveis \+= 1; \}/,
+    "falha ao abrir o anexo precisa ser contada, não engolida");
+  assert.match(importador, /!pacote\.incompleto/,
+    "a seleção precisa recusar pacote incompleto");
+});
+
+check("a fila é lida numa varredura só", () => {
+  // Reenumerar o diretório para cada pacote fazia o custo subir ao quadrado, e a
+  // fila só cresce: nada a limpa.
+  const importador = fs.readFileSync(path.join(root, "flow_outlook_sync.js"), "utf8");
+  const varreduras = importador.match(/for await \(const \[nome, handle\] of/g) || [];
+  assert.equal(varreduras.length, 2,
+    "só a raiz da fila e o formato antigo em subpastas percorrem diretório");
+  assert.match(importador, /function classificarNomePlano/,
+    "os arquivos precisam ser agrupados pelo prefixo em memória");
+});
+
+check("o canal de origem gravado é o que a RPC reconhece", () => {
+  const importador = fs.readFileSync(path.join(root, "flow_outlook_sync.js"), "utf8");
+  assert.match(importador, /origem_preenchimento: "integracao_outlook"/,
+    "com outro valor, o rótulo gravado perde a origem Outlook");
+});
+
+check("a aba Acesso sobrevive a uma falha na numeração dos protocolos", () => {
+  const admin = fs.readFileSync(path.join(root, "flow_admin.js"), "utf8");
+  assert.match(admin, /if \(dominios\.error \|\| equipe\.error\) \{/,
+    "domínios e lista da equipe não podem cair junto com a numeração");
+  assert.match(admin, /protocolos\.error\s*\?/,
+    "a falha da numeração precisa aparecer no lugar do bloco, não no lugar da aba");
+  assert.match(admin, /function historicoDeProtocolos/,
+    "o histórico de ajustes precisa ter caminho de leitura");
+});
+
+check("o ícone não carrega sobra de recorte", () => {
+  // O PNG anterior trazia, colado na borda direita, um fragmento de outra letra
+  // — sinal de que fora recortado de uma imagem maior.
+  const arquivo = fs.readFileSync(path.join(root, "grcon-icon.png"));
+  assert.equal(arquivo.subarray(1, 4).toString("ascii"), "PNG");
+  const largura = arquivo.readUInt32BE(16);
+  const altura = arquivo.readUInt32BE(20);
+  assert.equal(largura, altura, "o ícone precisa ser quadrado");
+  assert.equal(arquivo[25], 6, "o ícone precisa manter o canal alfa (transparência)");
+  assert.ok(arquivo.length < 200 * 1024, "o ícone precisa continuar leve");
+  assert.equal(fs.existsSync(path.join(root, "grcon-icon.ico")), false,
+    "o ícone antigo não é referenciado por nenhuma página");
 });
 
 console.log(JSON.stringify({ app: "GRCON Flow", passou: true, testes: checks.length, nomes: checks }, null, 2));

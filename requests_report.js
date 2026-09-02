@@ -309,9 +309,28 @@
     return (items || []).map((item) => CONTROL_COLUMNS.map((coluna) => controlValue(item, coluna.key)));
   }
 
+  /**
+   * Prepara um valor para viajar numa célula colada.
+   *
+   * Duas coisas quebram ao colar texto de e-mail numa planilha. A primeira é a
+   * estrutura: uma tabulação ou uma quebra de linha dentro do "Corpo do e-mail"
+   * empurra o resto da linha para colunas erradas. A segunda é a fórmula: o
+   * Excel avalia o que começa com `=`, `+`, `-` ou `@`, e o texto vem de quem
+   * mandou o e-mail. O apóstrofo é a marca que a própria planilha usa para
+   * dizer "isto é texto".
+   */
+  function clipboardCell(valor) {
+    const texto = String(valor === null || valor === undefined ? "" : valor)
+      .replace(/[\t\v\f]/g, " ")
+      .replace(/\r\n?|\n/g, " ")
+      .replace(/ {2,}/g, " ")
+      .trim();
+    return /^[=+\-@]/.test(texto) ? `'${texto}` : texto;
+  }
+
   /** Texto separado por tabulação, para colar direto na planilha. */
   function controlClipboardText(items, includeHeaders) {
-    const linhas = controlRows(items).map((linha) => linha.join("\t"));
+    const linhas = controlRows(items).map((linha) => linha.map(clipboardCell).join("\t"));
     if (!includeHeaders) return linhas.join("\n");
     return [CONTROL_COLUMNS.map((coluna) => coluna.header).join("\t"), ...linhas].join("\n");
   }
@@ -521,6 +540,7 @@
     previewExportTemplate,
     controlRows,
     controlClipboardText,
+    clipboardCell,
     CONTROL_HEADER_ROW,
     writeControlSheet,
     writeConsultationSheet,

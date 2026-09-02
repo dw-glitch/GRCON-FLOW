@@ -57,9 +57,16 @@ GRCON Flow lê essa pasta somente depois de a pessoa autorizá-la no navegador.
 O registro continua assistido: remetente, tipo, pedido, documentos e anexos são
 mostrados para revisão. Ao confirmar, a mesma RPC protegida do Registro rápido
 cria o protocolo, envia os arquivos e executa a triagem nas LDs. A chave
-derivada do identificador do e-mail torna a repetição idempotente, e o arquivo
-`<ID>__importado.json` gravado na fila guarda o protocolo e permite retomar anexos
-sem duplicar o pedido.
+derivada do identificador do e-mail torna a repetição idempotente **para toda a
+equipe** — o mesmo e-mail devolve o mesmo protocolo, tenha sido importado por
+quem for —, e o arquivo `<ID>__importado.json` gravado na fila guarda o protocolo
+e permite retomar anexos sem duplicar o pedido.
+
+**Pacote incompleto não é registrado.** O marcador `__pronto.json` declara
+quantos anexos o e-mail tinha; se a fila tiver menos do que isso, ou se algum
+arquivo estiver na pasta sem poder ser aberto, o cartão aparece como
+**Incompleto** e o botão recusa. Um anexo que sumiu em silêncio é pior do que
+uma importação que espera cinco minutos.
 
 O contrato e a montagem do fluxo estão em [`power-automate/README.md`](power-automate/README.md).
 
@@ -123,6 +130,13 @@ formulário.
 ALOCAÇÃO IDENTIFICADA". Documento fora das bases vira "NÃO LOCALIZADO NAS LDS
 ATIVAS". Um título nunca vira código sozinho: o Flow oferece candidatos e o
 operador confirma.
+
+**Nada é descartado antes de perguntar.** O navegador conhece três formatos
+normativos; a LD conhece o que a empresa de fato emitiu, inclusive grafias
+antigas e códigos de outro emitente. Por isso toda linha informada viaja para o
+servidor com a forma em que chegou, e é lá — depois da consulta às LDs vigentes —
+que um falso código vira `CODIGO_INVALIDO_IGNORADO`. Descartar no navegador o
+que o regex local não reconhece seria decidir sem consultar.
 
 **Urgência é ato explícito, e escasso.** O solicitante pode marcar o pedido como
 urgente no formulário, e a equipe pode subir ou baixar a prioridade na ficha. A

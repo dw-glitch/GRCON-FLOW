@@ -490,6 +490,32 @@
     ]);
   }
 
+  /**
+   * Quem mexeu na sequência, quando, e de que número para qual.
+   *
+   * O banco já gravava esse histórico desde a criação da funcionalidade, mas
+   * não havia nenhum caminho de leitura: a auditoria existia e ninguém podia
+   * consultá-la fora do SQL Editor.
+   */
+  function historicoDeProtocolos(ajustes) {
+    const linhas = Array.isArray(ajustes) ? ajustes : [];
+    if (!linhas.length) {
+      return elemento("small", {
+        style: "display:block;margin-top:.7rem;color:var(--text-3)",
+        text: "A sequência ainda não foi alterada manualmente.",
+      });
+    }
+    return elemento("details", { style: "margin-top:.7rem" }, [
+      elemento("summary", { text: `Alterações da sequência (${linhas.length})` }),
+      elemento("ul", { style: "margin:.5rem 0 0;padding-left:1.2rem" }, linhas.map((ajuste) => elemento("li", {
+        text: `${Ui.dataHora ? Ui.dataHora(ajuste.created_at) : texto(ajuste.created_at)}`
+          + ` · ${texto(ajuste.changed_by_name) || "usuário removido"}`
+          + ` · último número ${Number(ajuste.previous_last_number) || 0}`
+          + ` → próximo ${Number(ajuste.next_number) || 0}`,
+      }))),
+    ]);
+  }
+
   function blocoNumeracaoProtocolos(configuracao, recarregar) {
     const dados = configuracao || {};
     const ano = Number(dados.year) || new Date().getFullYear();
@@ -517,6 +543,7 @@
           entrada,
         ]),
       ]),
+      historicoDeProtocolos(dados.adjustments),
       elemento("div", { class: "flow-acoes", style: "margin-top:.8rem" }, [
         elemento("button", {
           class: "primary-button", type: "button", text: "Definir próximo protocolo",
@@ -548,15 +575,25 @@
     const [dominios, equipe, protocolos] = await Promise.all([
       Api.acesso.dominios(), Api.acesso.listar(), Api.protocolos.configuracao(),
     ]);
-    if (dominios.error || equipe.error || protocolos.error) {
-      Ui.vazio(destino, "Não foi possível carregar", dominios.error || equipe.error || protocolos.error);
+    // Domínios e lista da equipe são o que esta aba existe para administrar.
+    // A numeração dos protocolos entrou depois: uma falha nela não pode levar
+    // junto a administração de acesso, que já funcionava sozinha.
+    if (dominios.error || equipe.error) {
+      Ui.vazio(destino, "Não foi possível carregar", dominios.error || equipe.error);
       return;
     }
     const recarregar = () => montarAcesso(destino);
     destino.replaceChildren(
       elemento("div", { class: "flow-aviso", text:
         "Duas perguntas diferentes: o domínio diz quem pode criar conta; a lista de e-mails diz quem é da equipe e vê o painel." }),
-      blocoNumeracaoProtocolos(protocolos.data, recarregar),
+      protocolos.error
+        ? elemento("section", { class: "flow-card" }, [
+          elemento("div", { class: "flow-card-head" }, [
+            elemento("h3", { text: "Numeração dos protocolos" }),
+            elemento("p", { text: `Indisponível no momento: ${protocolos.error}` }),
+          ]),
+        ])
+        : blocoNumeracaoProtocolos(protocolos.data, recarregar),
       blocoDominios(dominios.data, recarregar),
       blocoEquipe(equipe.data || [], recarregar)
     );
