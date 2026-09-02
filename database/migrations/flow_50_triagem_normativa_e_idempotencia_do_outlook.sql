@@ -1,5 +1,6 @@
 -- GRCON Flow 50 — corrige a validação normativa, torna a importação do Outlook
 -- idempotente entre pessoas e fecha o acesso da base documental.
+-- Aplicada no projeto em 20260902220429.
 --
 -- 1) o emitente da N-1710 deixa de ser o literal `C1O`;
 -- 2) o mesmo e-mail importado por dois integrantes devolve um só protocolo;

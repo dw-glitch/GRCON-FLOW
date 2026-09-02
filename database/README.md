@@ -59,6 +59,15 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_51_protocolo_fuso_teto_e_auditoria` | Ano do protocolo no fuso de Brasília, teto de 999999 no gerador e leitura do histórico de ajustes |
 | `flow_52_limpeza_da_fase_3` | **Destrutiva.** Remove as tabelas e funções que sobraram da caixa externa e da ponte local. Desfazimento em `flow_52_rollback_da_fase_3.sql` |
 
+As migrações `flow_49` a `flow_52` foram aplicadas em 02/09/2026, nesta ordem:
+`flow_49`, `flow_51`, `flow_50`, `flow_52` — a 51 antes da 50 porque
+`flow_create_request` chama `flow_next_protocol`, e o gerador precisava já estar
+no fuso certo. Depois delas os avisos de segurança do Advisor caíram de 60 para
+50, o aviso de função `SECURITY DEFINER` executável pelo papel anônimo
+desapareceu, e `rls_enabled_no_policy` caiu de três tabelas para duas — as duas
+que restam (`flow_owner_bootstrap` e `flow_protocol_counters`) são negação total
+proposital.
+
 Aplicadas no projeto sem arquivo correspondente aqui, todas da Fase 3 já
 removida: `flow_43_external_inbox_phase_3`, `flow_44_external_inbox_review_index`,
 `flow_46_outlook_local_bridge` e `flow_47_outlook_bridge_created_by_index`. O

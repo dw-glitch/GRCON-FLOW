@@ -1,4 +1,5 @@
 -- GRCON Flow 49 — a policy do Storage passa a aceitar anexo de imagem.
+-- Aplicada no projeto em 20260902220240.
 --
 -- A flow_32 abriu imagem em quatro lugares: `storage.buckets.allowed_mime_types`,
 -- a constraint de extensão de `flow_attachments`, a constraint de MIME e o

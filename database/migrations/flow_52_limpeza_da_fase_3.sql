@@ -1,4 +1,5 @@
 -- GRCON Flow 52 — remove do banco o que sobrou da Fase 3.
+-- Aplicada no projeto em 20260902220503.
 --
 -- ATENÇÃO: esta é a única migração destrutiva do projeto. Leia o cabeçalho
 -- inteiro e rode as conferências antes de aplicar. O desfazimento está em
@@ -33,7 +34,7 @@
 --           and pg_get_functiondef(p.oid) ~* 'external_inbox|external_webhook_secrets|outlook_bridge';
 --      O resultado deve conter apenas as seis funções listadas acima.
 --   3. Nenhuma solicitação pode apontar para a caixa antiga:
---        select count(*) from public.flow_requests where form_data ? 'inbox_id';
+--        select count(*) from public.flow_requests where jsonb_exists(form_data, 'inbox_id');
 --
 -- RISCO
 --   Baixo com as tabelas vazias: nada é lido, escrito ou referenciado. O risco
@@ -60,7 +61,7 @@ declare
 begin
   select count(*) into entradas from public.flow_external_inbox;
   select count(*) into segredos from public.flow_external_webhook_secrets;
-  select count(*) into vinculos from public.flow_requests where form_data ? 'inbox_id';
+  select count(*) into vinculos from public.flow_requests where jsonb_exists(form_data, 'inbox_id');
 
   if entradas > 0 or segredos > 0 then
     raise exception

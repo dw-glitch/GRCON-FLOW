@@ -1,5 +1,6 @@
 -- GRCON Flow 51 — o ano do protocolo passa a ser o ano de Brasília, o teto de
 -- 999999 vale também no gerador, e a auditoria da numeração ganha leitura.
+-- Aplicada no projeto em 20260902220308.
 --
 -- 1) `extract(year from now())` usava o `TimeZone` do banco, que é UTC: entre
 --    21h e meia-noite de 31/12 o protocolo já saía com o ano seguinte, e até
@@ -82,10 +83,10 @@ begin
 
   -- Quem escolheu, quando, e de que número para qual. A tabela continua fechada
   -- por RLS; esta função é o único caminho de leitura, e só para administrador.
-  select coalesce(jsonb_agg(linha order by linha->>'created_at' desc), '[]'::jsonb)
+  select coalesce(jsonb_agg(linha order by ordem desc), '[]'::jsonb)
     into historico
     from (
-      select jsonb_build_object(
+      select a.created_at as ordem, jsonb_build_object(
         'year', a.year,
         'previous_last_number', a.previous_last_number,
         'next_number', a.next_number,
