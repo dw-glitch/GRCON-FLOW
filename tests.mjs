@@ -2129,4 +2129,40 @@ check("o ícone não carrega sobra de recorte", () => {
     "o ícone antigo não é referenciado por nenhuma página");
 });
 
+check("o repositório carrega o histórico inteiro de migrações", () => {
+  // Sem as migrações de base, o repositório descreve um banco que ele não sabe
+  // construir: não há homologação, não há restauração, e a auditoria de um
+  // objeto antigo só pode ser feita olhando a produção.
+  const pasta = path.join(root, "database/migrations");
+  const ordem = fs.readFileSync(path.join(pasta, "ORDEM.md"), "utf8");
+
+  const citados = [...ordem.matchAll(/\| `(flow_[a-z0-9_]+\.sql)` \|/g)].map((achado) => achado[1]);
+  assert.ok(citados.length >= 45, "o manifesto precisa cobrir o histórico aplicado");
+  citados.forEach((arquivo) => {
+    assert.ok(fs.existsSync(path.join(pasta, arquivo)),
+      `ORDEM.md aponta para ${arquivo}, que não está no repositório`);
+  });
+  assert.doesNotMatch(ordem, /\*\*ARQUIVO AUSENTE\*\*/,
+    "toda migração aplicada precisa ter arquivo correspondente");
+
+  // As onze de base são o que faltava: sem elas nada mais se sustenta.
+  for (let numero = 1; numero <= 11; numero += 1) {
+    const prefixo = `flow_${String(numero).padStart(2, "0")}_`;
+    assert.ok(fs.readdirSync(pasta).some((arquivo) => arquivo.startsWith(prefixo)),
+      `falta a migração de base ${prefixo}*`);
+  }
+});
+
+check("a limpeza da Fase 3 também roda num banco novo", () => {
+  // As migrações da Fase 3 não voltam ao repositório: num banco novo aqueles
+  // objetos nunca chegam a existir. A limpeza precisa então não ter o que
+  // remover, em vez de falhar procurando uma tabela ausente.
+  const limpeza = fs.readFileSync(
+    path.join(root, "database/migrations/flow_52_limpeza_da_fase_3.sql"), "utf8");
+  assert.match(limpeza, /to_regclass\('public\.flow_external_inbox'\) is not null/);
+  assert.match(limpeza, /to_regclass\('public\.flow_external_webhook_secrets'\) is not null/);
+  assert.match(limpeza, /drop table if exists/,
+    "a remoção precisa tolerar a ausência das tabelas");
+});
+
 console.log(JSON.stringify({ app: "GRCON Flow", passou: true, testes: checks.length, nomes: checks }, null, 2));

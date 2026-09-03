@@ -6,20 +6,22 @@ Supabase do GRCON principal é usado — os dois sistemas não compartilham base
 As migrações estão aplicadas e versionadas no próprio projeto Supabase
 (`supabase_migrations.schema_migrations`), na ordem abaixo.
 
-> **O repositório ainda não recria o banco do zero.** As migrações `flow_01` a
-> `flow_11` nunca foram versionadas aqui, e cinco delas foram aplicadas no
-> projeto com nome diferente do arquivo (`unified_sigem_workflow`,
-> `live_storage_metrics`, `owner_storage_visibility`,
-> `n1710_li_mc_pdf_excel_pair`, `flow_27_dwg_binary_mime`). Enquanto esse
-> histórico não for exportado do projeto, uma instalação nova — inclusive um
-> ambiente de homologação — não pode ser montada só a partir daqui.
+> **O histórico completo está aqui, mas a ordem não é a do `ls`.** As migrações
+> `flow_01` a `flow_11`, mais `flow_27_dwg_binary_mime` e
+> `flow_28_attachment_upload_and_dwg_mime_fix`, foram exportadas de
+> `supabase_migrations.schema_migrations` em 03/09/2026 — é o SQL que de fato
+> criou os objetos, não uma reconstrução a partir do schema. Para montar um banco
+> novo, siga [`migrations/ORDEM.md`](migrations/ORDEM.md): o nome do arquivo não
+> corresponde à ordem de aplicação em alguns pontos, e sete migrações do
+> repositório foram aplicadas pelo SQL Editor sem registro em
+> `schema_migrations`.
 
 > **A numeração dos arquivos tem colisões.** Existem duas migrações `flow_46`
 > aplicadas: `flow_46_outlook_local_bridge` (a ponte local, removida) e
 > `flow_46_triagem_normativa_e_protocolos` (a atual). O repositório também tem
-> dois arquivos `flow_27`. O nome do arquivo não é a ordem de aplicação — a
-> ordem é a coluna `version` da tabela de migrações. Numeração nova deve começar
-> em `flow_53`.
+> três arquivos `flow_27` e dois `flow_28`. A ordem é a coluna `version` da
+> tabela de migrações, registrada em [`migrations/ORDEM.md`](migrations/ORDEM.md).
+> Numeração nova deve começar em `flow_53`.
 
 | Migração | O que cria |
 | --- | --- |

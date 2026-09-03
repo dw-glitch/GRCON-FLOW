@@ -55,12 +55,20 @@ begin;
 
 do $$
 declare
-  entradas integer;
-  segredos integer;
+  entradas integer := 0;
+  segredos integer := 0;
   vinculos integer;
 begin
-  select count(*) into entradas from public.flow_external_inbox;
-  select count(*) into segredos from public.flow_external_webhook_secrets;
+  -- Numa instalação nova as tabelas nunca chegam a existir: as migrações da
+  -- Fase 3 não estão no repositório, de propósito. Conferir a existência antes
+  -- de contar é o que permite esta migração rodar tanto no banco em produção
+  -- (onde ela remove) quanto num banco novo (onde ela não tem o que remover).
+  if to_regclass('public.flow_external_inbox') is not null then
+    execute 'select count(*) from public.flow_external_inbox' into entradas;
+  end if;
+  if to_regclass('public.flow_external_webhook_secrets') is not null then
+    execute 'select count(*) from public.flow_external_webhook_secrets' into segredos;
+  end if;
   select count(*) into vinculos from public.flow_requests where jsonb_exists(form_data, 'inbox_id');
 
   if entradas > 0 or segredos > 0 then
