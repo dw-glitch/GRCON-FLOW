@@ -6,6 +6,23 @@ Supabase do GRCON principal é usado — os dois sistemas não compartilham base
 As migrações estão aplicadas e versionadas no próprio projeto Supabase
 (`supabase_migrations.schema_migrations`), na ordem abaixo.
 
+> **O histórico completo está aqui, mas a ordem não é a do `ls`.** As migrações
+> `flow_01` a `flow_11`, mais `flow_27_dwg_binary_mime` e
+> `flow_28_attachment_upload_and_dwg_mime_fix`, foram exportadas de
+> `supabase_migrations.schema_migrations` em 03/09/2026 — é o SQL que de fato
+> criou os objetos, não uma reconstrução a partir do schema. Para montar um banco
+> novo, siga [`migrations/ORDEM.md`](migrations/ORDEM.md): o nome do arquivo não
+> corresponde à ordem de aplicação em alguns pontos, e sete migrações do
+> repositório foram aplicadas pelo SQL Editor sem registro em
+> `schema_migrations`.
+
+> **A numeração dos arquivos tem colisões.** Existem duas migrações `flow_46`
+> aplicadas: `flow_46_outlook_local_bridge` (a ponte local, removida) e
+> `flow_46_triagem_normativa_e_protocolos` (a atual). O repositório também tem
+> três arquivos `flow_27` e dois `flow_28`. A ordem é a coluna `version` da
+> tabela de migrações, registrada em [`migrations/ORDEM.md`](migrations/ORDEM.md).
+> Numeração nova deve começar em `flow_53`.
+
 | Migração | O que cria |
 | --- | --- |
 | `flow_01_profiles_and_roles` | Perfis, os quatro papéis, gatilho do Auth, troca de papel |
@@ -37,6 +54,27 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_41_quick_registration_phase_2` | Adiciona colagem inteligente local e favoritos pessoais protegidos por RLS |
 | `flow_42_quick_template_type_index` | Indexa a relação entre favoritos e tipos para manter operações rápidas |
 | `flow_45_admin_request_owner` | Restringe responsável a perfis ativos da equipe, exclusivo da administração, com concorrência e histórico |
+| `flow_46_triagem_normativa_e_protocolos` | Correção determinística do código antes da LD, descarte do falso código depois dela, e sequência administrativa de protocolos |
+| `flow_48_protocol_adjustment_hardening` | Mantém privado o histórico de ajustes da numeração |
+| `flow_49_anexo_de_imagem_no_storage` | Acrescenta as extensões de imagem à policy de envio do Storage, que a `flow_32` não alcançou |
+| `flow_50_triagem_normativa_e_idempotencia_do_outlook` | Emitente da N-1710 deixa de ser literal, um e-mail vira um protocolo para toda a equipe, e a Base de LDs volta a respeitar a própria RLS |
+| `flow_51_protocolo_fuso_teto_e_auditoria` | Ano do protocolo no fuso de Brasília, teto de 999999 no gerador e leitura do histórico de ajustes |
+| `flow_52_limpeza_da_fase_3` | **Destrutiva.** Remove as tabelas e funções que sobraram da caixa externa e da ponte local. Desfazimento em `flow_52_rollback_da_fase_3.sql` |
+
+As migrações `flow_49` a `flow_52` foram aplicadas em 02/09/2026, nesta ordem:
+`flow_49`, `flow_51`, `flow_50`, `flow_52` — a 51 antes da 50 porque
+`flow_create_request` chama `flow_next_protocol`, e o gerador precisava já estar
+no fuso certo. Depois delas os avisos de segurança do Advisor caíram de 60 para
+50, o aviso de função `SECURITY DEFINER` executável pelo papel anônimo
+desapareceu, e `rls_enabled_no_policy` caiu de três tabelas para duas — as duas
+que restam (`flow_owner_bootstrap` e `flow_protocol_counters`) são negação total
+proposital.
+
+Aplicadas no projeto sem arquivo correspondente aqui, todas da Fase 3 já
+removida: `flow_43_external_inbox_phase_3`, `flow_44_external_inbox_review_index`,
+`flow_46_outlook_local_bridge` e `flow_47_outlook_bridge_created_by_index`. O
+registro delas **não deve ser apagado** de `schema_migrations`: é o que explica
+por que aqueles objetos existiram.
 
 ## Tabelas
 
@@ -58,6 +96,7 @@ As migrações estão aplicadas e versionadas no próprio projeto Supabase
 | `flow_settings` | Configurações gerais, inclusive os domínios autorizados. |
 | `flow_access_allowlist` | E-mails da equipe e o papel de cada um. Admin-only. |
 | `flow_protocol_counters` | Numeração do protocolo. Sem policy: só a função a alcança. |
+| `flow_protocol_adjustments` | Quem mudou a sequência, quando e de que número para qual. Fechada por RLS; lida só por `flow_protocol_settings()`. |
 | `flow_norms` / `flow_norm_versions` | Norma e histórico de revisões, com uma vigente por código. Texto e anexos da N-1710 têm controle independente. |
 | `flow_norm_catalog_entries` | Histórico append-only dos códigos usados na validação das LDs. |
 | `flow_owner_bootstrap` | E-mail único autorizado a criar o primeiro proprietário. Não é exposto à API. |

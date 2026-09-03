@@ -161,8 +161,13 @@
     if (!motor) return [];
     return motor.parseDocumentList(bruto).map((linha) => {
       const codigo = corrigirCodigoParaTriagem(linha.document);
-      if (codigo) return itemDeCodigo(codigo, { titulo: linha.requestedTitle });
-      return linha.requestedTitle ? itemDeTitulo(linha.requestedTitle, linha.document) : null;
+      if (codigo) {
+        return itemDeCodigo(codigo, { titulo: linha.requestedTitle, referencia: linha.document });
+      }
+      if (linha.requestedTitle) return itemDeTitulo(linha.requestedTitle, linha.document);
+      // Forma não reconhecida aqui não é forma inexistente: o servidor ainda
+      // vai procurá-la nas LDs vigentes. Ver `daListaFlexivel`.
+      return linha.document ? itemDeCodigo(linha.document, { referencia: linha.document }) : null;
     }).filter(Boolean);
   }
 
@@ -173,6 +178,15 @@
    *   - código + título separados por TAB, ponto-e-vírgula ou |.
    * O código continua opcional: título sem código vira item legítimo para a
    * equipe identificar antes de incluir na LD, alocar e postar.
+   *
+   * Nenhuma linha é descartada aqui. O navegador conhece três formatos
+   * normativos; a LD conhece o que a empresa de fato emitiu — inclusive grafias
+   * antigas e códigos de outro emitente. Jogar fora no navegador o que não casa
+   * com o regex local é decidir antes de perguntar: a consulta às LDs vigentes
+   * só existe no servidor, e é lá que `flow_triage_item` decide entre localizar,
+   * tratar como documento novo ou registrar `CODIGO_INVALIDO_IGNORADO`. Por isso
+   * a forma recebida viaja sempre — em `document`, quando parece código, e em
+   * `reference`, sempre, para a auditoria da forma original.
    */
   function daListaFlexivel(bruto) {
     return texto(bruto).split(/\r?\n/).map((linha) => linha.trim()).filter(Boolean).map((linha) => {
@@ -180,11 +194,11 @@
       if (partes.length > 1 && pareceCodigo(partes[0])) {
         const codigo = corrigirCodigoParaTriagem(partes[0]);
         const titulo = partes.slice(1).join(" - ");
-        return codigo ? itemDeCodigo(codigo, { titulo }) : (titulo ? itemDeTitulo(titulo, partes[0]) : null);
+        return itemDeCodigo(codigo || partes[0], { titulo, referencia: partes[0] });
       }
       if (pareceCodigo(linha)) {
         const codigo = corrigirCodigoParaTriagem(linha);
-        return codigo ? itemDeCodigo(codigo) : null;
+        return itemDeCodigo(codigo || linha, { referencia: linha });
       }
       return itemDeTitulo(linha, "");
     }).filter(Boolean);

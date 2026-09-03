@@ -100,7 +100,23 @@ grant execute on function public.flow_document_code_is_normative(text) to authen
 
 -- Conserva a triagem consolidada até a flow_45 e coloca a validação normativa
 -- como uma camada final. A função-base continua inacessível diretamente.
-alter function public.flow_triage_item(uuid) rename to flow_triage_item_base_v46;
+--
+-- O `rename` é a única operação não idempotente do arquivo: reaplicado, ele
+-- tentaria renomear o invólucro para um nome já ocupado e abortaria a migração
+-- inteira. A guarda abaixo faz a renomeação acontecer uma vez só — o que
+-- importa numa instalação nova, numa restauração de backup ou em qualquer
+-- reexecução do histórico.
+do $$
+begin
+  if not exists (
+    select 1 from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.proname = 'flow_triage_item_base_v46'
+  ) then
+    alter function public.flow_triage_item(uuid) rename to flow_triage_item_base_v46;
+  end if;
+end $$;
+
 revoke all on function public.flow_triage_item_base_v46(uuid) from public, anon, authenticated;
 grant execute on function public.flow_triage_item_base_v46(uuid) to service_role;
 

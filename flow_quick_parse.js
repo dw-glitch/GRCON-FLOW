@@ -228,8 +228,15 @@
     return resultado || cabecalho.assunto;
   }
 
+  const LIMITE_DE_ANALISE = 20000;
+
   function analisar(bruto, { tipos = [] } = {}) {
-    const original = String(bruto || "").slice(0, 20000);
+    const inteiro = String(bruto || "");
+    // O corte existe para não varrer linha a linha uma mensagem enorme. Mas ele
+    // era silencioso: um e-mail longo perdia o final sem ninguém saber. Agora a
+    // análise continua limitada e quem chama fica sabendo que houve corte.
+    const truncado = inteiro.length > LIMITE_DE_ANALISE;
+    const original = truncado ? inteiro.slice(0, LIMITE_DE_ANALISE) : inteiro;
     const linhas = linhasDe(original);
     const cabecalho = dadosDoCabecalho(linhas);
     const documentos = extrairDocumentos(linhas);
@@ -246,6 +253,7 @@
       tipoCodigo: tipo.codigo,
       tipoConfiavel: tipo.confiavel,
       canal: cabecalho.canal,
+      truncado,
     });
   }
 
